@@ -1,0 +1,4 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { Projects } from './index.js';
+test('project build/run', async () => { const p = Projects.create({ name: 'p', files: { 'index.ts': 'console.log(1)' } }, { userId: 'u' }); assert.equal((await Projects.build(p.id, { userId: 'u' })).success, true); });
