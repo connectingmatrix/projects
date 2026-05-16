@@ -1,0 +1,41 @@
+{
+  "package": "@connectingmatrix/projects",
+  "summary": "Project CRUD, source tree, source archives via file module, temporary mounted source sessions, project debug agent chat, connected DB query tools, build/run/deploy/log ownership.",
+  "contracts": [
+    "Projects.create/getObject/getList/update/delete",
+    "Projects.writeFile/readFile/listFiles",
+    "Projects.useFileModule/useArchiveProvider",
+    "Projects.saveSourceArchive/restoreSourceArchive with node_modules/dist/build/.git excluded",
+    "Projects.mountSourceSession/clearAgentContext",
+    "Projects.bindChat(Chat) for browser-only debug context",
+    "Projects.debugWithAI(projectId, { message, databaseId, query })",
+    "Projects.connectDatabase/listDatabases/executeDatabaseQuery",
+    "Projects.setDatabaseQueryAdapter",
+    "Projects.build/run/deploy/getDeploymentLogs",
+    "Projects.setBuilderAdapter/setDeploymentAdapter",
+    "Projects.setDebugEventSink ClickHouse hook"
+  ],
+  "exports": [
+    ".",
+    "./backend",
+    "./ui",
+    "./entity",
+    "./package.json",
+    "./package-structure",
+    "./launcher",
+    "./observability",
+    "./backend/project-agent"
+  ],
+  "folderCounts": {
+    "src/ui": 6,
+    "src/backend": 18,
+    "src/entity": 9,
+    "migrations": 3
+  },
+  "launcher": "playground.mjs",
+  "observability": true,
+  "eighthPassGapClosure": {
+    "implemented": true,
+    "summary": "Eighth pass project runtime contract"
+  }
+}

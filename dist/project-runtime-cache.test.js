@@ -1,0 +1,23 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { Projects } from './index.js';
+test('projects use runtime queue, sanctioned dependency planning, and session garbage collection', () => {
+    const Runtime = Projects;
+    Runtime.configurePnpmCache({ localDir: '/tmp/giga-test-cache', pvcMountDir: '/var/lib/giga/runtime-cache' });
+    const published = [];
+    Runtime.bindRuntimeQueue({ publish: (event) => { published.push(event); } });
+    const project = Projects.create({ name: 'Runtime project' }, { root: true });
+    Projects.writeFile(project.id, 'package.json', JSON.stringify({ dependencies: { react: '^19.0.0', unknownpkg: '1.0.0' } }), { root: true });
+    Projects.writeFile(project.id, 'src/App.tsx', "import { Icon } from 'lucide-react'; export default function App(){ return null }", { root: true });
+    const plan = Runtime.dependencyPlan(project.id, { root: true });
+    assert.ok(plan.packages.includes('lucide-react'));
+    assert.ok(plan.rejected.includes('unknownpkg'));
+    const build = Projects.build(project.id, { root: true });
+    assert.equal(build.status, 'queued');
+    assert.equal(published.length, 1);
+    assert.equal(Runtime.runtimeQueueStatus(project.id)[0].status, 'queued');
+    const session = Projects.startAssistantSession(project.id, {}, { root: true });
+    assert.equal(Runtime.closeAssistantSession(session.id, { root: true }), true);
+    const gc = Runtime.garbageCollectSessions({ olderThanMs: 0, includeOpen: true }, { root: true });
+    assert.ok(gc.retainedMounts >= 0);
+});

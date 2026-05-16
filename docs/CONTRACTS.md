@@ -86,12 +86,6 @@ GraphQL namespace and routes are returned by `createPackage()`. Routes include h
 - `src/entity`: 9 files
 - `migrations`: 3 files
 
-
-
-## Final gap closure
-
-See `docs/FINAL_GAP_CLOSURE_CONTRACTS.md` for the final process-monitor, project, node, workflow, and package-owned contract audit.
-
 ## Eighth pass project runtime contract
 
 `@connectingmatrix/projects` owns project CRUD, project source sessions, build/run/deploy, project logs, heartbeat state, connected DB query tools, and the project software-builder assistant.
@@ -113,26 +107,3 @@ await Projects.restoreSourceArchive(projectId, archive);
 ```
 
 Source archives are delegated to `@connectingmatrix/file` and exclude `node_modules/`, build outputs, caches, git metadata, logs, and temporary files. Debug chat stays browser-context-only; debug events can be sent to a ClickHouse-style sink without writing normal Chat DB messages.
-
-## Final runtime contracts
-
-See `docs/FINAL_RUNTIME_CONTRACTS.md` for the final package-owned API, routes, launcher, observability, and wiring contracts.
-
-
-## Final package contracts
-
-- `Projects.create/update/delete/getList/getObject/search`
-- `Projects.writeFile/readFile/listFiles/sourceManifest`
-- `Projects.saveSourceArchive/restoreSourceArchive via @connectingmatrix/file`
-- `Projects.build/run/deploy/checkDeploymentLogs`
-- `Projects.heartbeat(projectId,state)`
-- `Projects.logs/getProjectLogs/processLogs`
-- `Projects.startAssistantSession/assistantMessage/debugWithAI/clearAssistantContext`
-- `Projects.connectDatabase/executeDatabaseQuery`
-- `Projects.abort(projectIdOrProcessId)`
-
-See `docs/AUTO_GENERATED_CONTRACTS.md` and `docs/OBSERVABILITY.md` for generated operational docs.
-
-## Ninth pass runtime queue/cache closure
-
-Project runtime queue and pnpm cache now exposes package-owned contracts for live runtime status, package observability, and launcher/test mode. Runtime state should come from queues, process monitor, sockets, or explicit package adapters; persisted rows are retained for audit/history only.

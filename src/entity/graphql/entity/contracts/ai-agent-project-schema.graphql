@@ -1,0 +1,188 @@
+scalar JSON
+
+type AIAgentProject {
+  id: ID!
+  agentId: ID
+  ownerType: String
+  ownerId: ID
+  organizationId: ID
+  chatId: ID
+  name: String!
+  slug: String!
+  description: String
+  projectKind: String
+  status: String
+  stack: JSON
+  architecture: JSON
+  files: JSON
+  databaseManifest: JSON
+  runtimeManifest: JSON
+  lastRun: JSON
+  metadata: JSON
+  sourceArchiveBucket: String
+  sourceArchivePath: String
+  sourceArchiveSha256: String
+  sourceArchiveBytes: Float
+  sourceArchiveEncoding: String
+  sourceArchiveBase64: String
+  createdBy: ID
+  createdAt: String
+  updatedAt: String
+}
+
+type AIAgentProjectFile {
+  id: ID!
+  path: String!
+  name: String!
+  type: String!
+  mimeType: String
+  content: String
+  sizeBytes: Float
+  updatedAt: String
+  children: JSON
+}
+
+type AIAgentProjectDatabasePayload {
+  projectId: ID!
+  sql: String!
+  mode: String!
+  columns: [String!]!
+  rows: [JSON!]!
+  affectedRows: Int!
+  warnings: [String!]!
+}
+
+type AIAgentProjectFileDeletePayload {
+  projectId: ID!
+  path: String!
+  deleted: Boolean!
+  deletedChildren: Int!
+}
+
+type AIAgentProjectBuildPayload {
+  projectId: ID!
+  processId: ID!
+  status: String!
+  command: String!
+  scopeType: String!
+  parentScopeId: ID!
+}
+
+type AIAgentProjectDatabaseViewerPayload {
+  projectId: ID!
+  viewer: String!
+  launchUrl: String!
+  engine: String!
+  connectionName: String!
+  workspacePath: String!
+  external: Boolean!
+  verified: Boolean!
+  warnings: [String!]!
+}
+
+type AIAgentProjectExternalDatabaseVerifyPayload {
+  projectId: ID!
+  status: String!
+  engine: String!
+  host: String
+  port: Int
+  message: String!
+  warnings: [String!]!
+}
+
+type AIAgentProjectDeletePayload {
+  id: ID!
+  deleted: Boolean!
+  workspacePath: String
+}
+
+input AIAgentProjectCreateInput {
+  agentId: ID
+  name: String!
+  slug: String
+  description: String
+  projectKind: String
+  stack: JSON
+  files: [JSON!]
+  databaseManifest: JSON
+  runtimeManifest: JSON
+  organizationId: ID
+  metadata: JSON
+}
+
+input AIAgentProjectUpdateInput {
+  id: ID!
+  name: String
+  slug: String
+  description: String
+  projectKind: String
+  status: String
+  stack: JSON
+  files: [JSON!]
+  databaseManifest: JSON
+  runtimeManifest: JSON
+  metadata: JSON
+}
+
+input AIAgentProjectFileReadInput {
+  projectId: ID!
+  path: String!
+}
+
+input AIAgentProjectFileWriteInput {
+  projectId: ID!
+  path: String!
+  content: String!
+  mimeType: String
+}
+
+input AIAgentProjectFolderInput {
+  projectId: ID!
+  path: String!
+}
+
+input AIAgentProjectFileDeleteInput {
+  projectId: ID!
+  path: String!
+}
+
+input AIAgentProjectDatabaseInput {
+  projectId: ID!
+  sql: String!
+  mode: String
+}
+
+input AIAgentProjectBuildInput {
+  projectId: ID!
+  command: String
+  deploy: Boolean
+}
+
+input AIAgentProjectDatabaseViewerInput {
+  projectId: ID!
+  mode: String
+  connectionId: String
+}
+
+extend type Query {
+  aiAgentProjects(agentId: ID, first: Int, offset: Int): [AIAgentProject!]!
+  aiAgentProject(id: ID!): AIAgentProject
+}
+
+extend type Mutation {
+  createAiAgentProject(input: AIAgentProjectCreateInput!): AIAgentProject!
+  updateAiAgentProject(input: AIAgentProjectUpdateInput!): AIAgentProject!
+  deleteAiAgentProject(id: ID!): AIAgentProjectDeletePayload!
+  aiAgentProjectReadFile(input: AIAgentProjectFileReadInput!): AIAgentProjectFile!
+  aiAgentProjectWriteFile(input: AIAgentProjectFileWriteInput!): AIAgentProjectFile!
+  aiAgentProjectCreateFolder(input: AIAgentProjectFolderInput!): AIAgentProjectFile!
+  aiAgentProjectDeleteFile(input: AIAgentProjectFileDeleteInput!): AIAgentProjectFileDeletePayload!
+  aiAgentProjectDatabaseQuery(input: AIAgentProjectDatabaseInput!): AIAgentProjectDatabasePayload!
+  aiAgentProjectDatabaseAlter(input: AIAgentProjectDatabaseInput!): AIAgentProjectDatabasePayload!
+  aiAgentProjectBuild(input: AIAgentProjectBuildInput!): AIAgentProjectBuildPayload!
+  aiAgentProjectRun(input: AIAgentProjectBuildInput!): AIAgentProjectBuildPayload!
+  aiAgentProjectDeploy(input: AIAgentProjectBuildInput!): AIAgentProjectBuildPayload!
+  aiAgentProjectVerifyExternalDatabase(input: AIAgentProjectDatabaseViewerInput!): AIAgentProjectExternalDatabaseVerifyPayload!
+  aiAgentProjectLaunchDatabaseViewer(input: AIAgentProjectDatabaseViewerInput!): AIAgentProjectDatabaseViewerPayload!
+  aiAgentProjectDatabaseLaunchViewer(input: AIAgentProjectDatabaseViewerInput!): AIAgentProjectDatabaseViewerPayload!
+}
