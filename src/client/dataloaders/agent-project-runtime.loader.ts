@@ -6,10 +6,10 @@ import {
     runAIAgentDataAnalysisOperation,
     runAIAgentProjectBuildOperation,
     writeAIAgentProjectFileOperation
-} from '@/orm';
-import type { AIAgentDataAnalysisPayload, AIAgentDataAnalysisTask, AIAgentProjectBuildPayload, AIAgentProjectDatabasePayload, AIAgentProjectDeveloperChatPayload, AIAgentProjectFilePayload } from '@/orm';
-import type { UiDataContext } from '@/dataloaders/context';
-import { assertCanPerform } from '@/dataloaders/permissions.loader';
+} from '@giga/dataloader/client/legacy/orm';
+import type { AIAgentDataAnalysisPayload, AIAgentDataAnalysisTask, AIAgentProjectBuildPayload, AIAgentProjectDatabasePayload, AIAgentProjectDeveloperChatPayload, AIAgentProjectFilePayload } from '@giga/dataloader/client/legacy/orm';
+import type { UiDataContext } from '@giga/dataloader/client/legacy/dataloaders/context';
+import { assertCanPerform } from '@giga/dataloader/client/legacy/dataloaders/permissions.loader';
 
 export const listAIAgentProjectFiles = async (context: UiDataContext, projectId: string): Promise<AIAgentProjectFilePayload[]> => {
     assertCanPerform(context.policy, 'Application', 'read');

@@ -1,7 +1,7 @@
-import { launchAIAgentProjectDatabaseViewerOperation, verifyAIAgentProjectDatabaseConnectionOperation } from '@/orm';
-import type { AIAgentProjectDatabaseLaunch } from '@/orm';
-import type { UiDataContext } from '@/dataloaders/context';
-import { assertCanPerform } from '@/dataloaders/permissions.loader';
+import { launchAIAgentProjectDatabaseViewerOperation, verifyAIAgentProjectDatabaseConnectionOperation } from '@giga/dataloader/client/legacy/orm';
+import type { AIAgentProjectDatabaseLaunch } from '@giga/dataloader/client/legacy/orm';
+import type { UiDataContext } from '@giga/dataloader/client/legacy/dataloaders/context';
+import { assertCanPerform } from '@giga/dataloader/client/legacy/dataloaders/permissions.loader';
 
 export const launchAIAgentProjectDatabaseViewer = async (context: UiDataContext, projectId: string, databasePath?: string | null, mode = 'internal'): Promise<AIAgentProjectDatabaseLaunch> => {
     assertCanPerform(context.policy, 'Application', 'read');

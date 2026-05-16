@@ -1,7 +1,7 @@
-import type { AIAgentProjectBuildPayload, AIAgentProjectDatabasePayload, AIAgentProjectDatabaseViewerPayload, AIAgentProjectExternalDatabaseVerifyPayload, AIAgentProjectFileDeletePayload, AIAgentProjectFileRecord, AIAgentProjectRecord } from '@/orm';
-import { aiAgentProjectOperation, aiAgentProjectsOperation, alterAiAgentProjectDatabaseOperation, buildAiAgentProjectOperation, createAiAgentProjectFolderOperation, createAiAgentProjectOperation, deleteAiAgentProjectFileOperation, deleteAiAgentProjectOperation, deployAiAgentProjectOperation, launchAiAgentProjectDatabaseViewerOperation, queryAiAgentProjectDatabaseOperation, readAiAgentProjectFileOperation, runAiAgentProjectOperation, updateAiAgentProjectOperation, verifyAiAgentProjectExternalDatabaseOperation, writeAiAgentProjectFileOperation } from '@/orm';
-import type { UiDataContext } from '@/dataloaders/context';
-import { assertCanPerform } from '@/dataloaders/permissions.loader';
+import type { AIAgentProjectBuildPayload, AIAgentProjectDatabasePayload, AIAgentProjectDatabaseViewerPayload, AIAgentProjectExternalDatabaseVerifyPayload, AIAgentProjectFileDeletePayload, AIAgentProjectFileRecord, AIAgentProjectRecord } from '@giga/dataloader/client/legacy/orm';
+import { aiAgentProjectOperation, aiAgentProjectsOperation, alterAiAgentProjectDatabaseOperation, buildAiAgentProjectOperation, createAiAgentProjectFolderOperation, createAiAgentProjectOperation, deleteAiAgentProjectFileOperation, deleteAiAgentProjectOperation, deployAiAgentProjectOperation, launchAiAgentProjectDatabaseViewerOperation, queryAiAgentProjectDatabaseOperation, readAiAgentProjectFileOperation, runAiAgentProjectOperation, updateAiAgentProjectOperation, verifyAiAgentProjectExternalDatabaseOperation, writeAiAgentProjectFileOperation } from '@giga/dataloader/client/legacy/orm';
+import type { UiDataContext } from '@giga/dataloader/client/legacy/dataloaders/context';
+import { assertCanPerform } from '@giga/dataloader/client/legacy/dataloaders/permissions.loader';
 
 export const loadAiAgentProject = async (context: UiDataContext, id: string): Promise<AIAgentProjectRecord> => {
     assertCanPerform(context.policy, 'AIAgentProject', 'read');

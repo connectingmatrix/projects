@@ -75,7 +75,7 @@ GraphQL namespace and routes are returned by `createPackage()`. Routes include h
 - `./entity`
 - `./package.json`
 - `./package-structure`
-- `./launcher`
+- `./services/package-status.service`
 - `./observability`
 - `./backend/project-agent`
 
@@ -132,3 +132,12 @@ See `docs/FINAL_RUNTIME_CONTRACTS.md` for the final package-owned API, routes, l
 - `Projects.abort(projectIdOrProcessId)`
 
 See `docs/AUTO_GENERATED_CONTRACTS.md` and `docs/OBSERVABILITY.md` for generated operational docs.
+
+
+## Examples
+
+Debug/demo launchers live in `examples/`. Run `npm run play` after `npm run build`.
+
+## Package documentation
+
+See `docs/INDEX.md` for the final clean workspace contract and `examples/` launcher/debug notes.
