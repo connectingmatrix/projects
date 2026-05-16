@@ -52,31 +52,3 @@ export const runAIAgentDataAnalysis = async (
     assertCanPerform(context.policy, 'AIAgent', 'update');
     return runAIAgentDataAnalysisOperation({ agentId, task, targetColumn, buildAndDeploy: buildAndDeploy || null, deploymentTarget: deploymentTarget || null });
 };
-
-export interface ProjectRuntimeStatusRow {
-    processId: string;
-    projectId: string;
-    kind: 'build' | 'run' | 'deploy' | 'assistant';
-    status: 'queued' | 'started' | 'running' | 'log' | 'heartbeat' | 'completed' | 'failed' | 'aborted';
-    progress: number;
-    source: string;
-    updatedAt: string;
-    logs: string[];
-}
-
-export const loadProjectRuntimeStatus = async (projectId?: string): Promise<ProjectRuntimeStatusRow[]> => {
-    const response = await fetch(`${import.meta.env.VITE_GRAPHQL_API_URL}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ query: 'query ProjectRuntimeStatus($projectId: ID){ projectRuntimeStatus(projectId: $projectId) }', variables: { projectId } }),
-    });
-    const payload = await response.json();
-    if (!response.ok || payload.errors?.length) throw new Error(JSON.stringify(payload.errors || payload));
-    return JSON.parse(payload.data.projectRuntimeStatus || '[]') as ProjectRuntimeStatusRow[];
-};
-
-export const closeProjectEditingSession = async (sessionId: string): Promise<boolean> => {
-    const response = await fetch(`${import.meta.env.VITE_API_ORIGIN}/projects/session/close`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId }) });
-    const payload = await response.json();
-    return Boolean(payload);
-};

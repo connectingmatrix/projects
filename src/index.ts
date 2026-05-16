@@ -1,4 +1,4 @@
-import { GraphQLClient } from './ui/graphql-client.js';
+import { GraphQLClient } from './client/graphql-client.js';
 import { InMemoryRepository, type BaseRecord } from './entity/repository.js';
 import { LocalEventBus, makeId, nowIso, type ListResult, type PackageHealth, type PackageModule, type PaginationOptions, type RequestContext } from './contracts.js';
 import { createStubLauncher } from './launcher.js';
@@ -7,7 +7,7 @@ import { PackageObservability } from './observability.js';
 export type ProjectStatus = 'draft' | 'active' | 'building' | 'running' | 'deployed' | 'errored' | 'aborted';
 export interface ProjectRecord extends BaseRecord { name: string; description?: string; status?: ProjectStatus; activeDeploymentId?: string; activeProcessId?: string; lastHeartbeatAt?: string; error?: string; metadata?: Record<string, unknown>; }
 export interface ProjectFile extends BaseRecord { projectId: string; path: string; content: string; mimeType?: string; metadata?: Record<string, unknown>; }
-export interface ProjectBuild extends BaseRecord { projectId: string; status: 'queued' | 'running' | 'passed' | 'failed' | 'aborted'; output: string; errors: string[]; processId?: string; sessionId?: string; }
+export interface ProjectBuild extends BaseRecord { projectId: string; status: 'passed' | 'failed' | 'aborted'; output: string; errors: string[]; processId?: string; sessionId?: string; }
 export interface ProjectRun extends BaseRecord { projectId: string; status: 'running' | 'success' | 'error' | 'aborted'; output?: string; logs: string[]; processId?: string; }
 export interface ProjectDeployment extends BaseRecord { projectId: string; buildId: string; status: 'deployed' | 'failed' | 'aborted'; url?: string; logs: string[]; processId?: string; }
 export interface ProjectDatabase extends BaseRecord { projectId: string; name: string; kind?: 'sqlite' | 'postgres' | 'mysql' | 'clickhouse' | 'supabase' | 'neo4j' | string; connectionRef?: string; driveFileId?: string; metadata?: Record<string, unknown>; }
@@ -59,97 +59,6 @@ function archiveAdapter(): FileModuleArchiveProvider | undefined { return archiv
 function filteredFiles(projectId: string, context: RequestContext): ProjectFile[] { return projectFiles(projectId, context).filter((file) => shouldArchive(file.path)); }
 function extractSql(message: string): string | undefined { return message.match(/```sql\s*([\s\S]*?)```/i)?.[1]?.trim() ?? message.match(/\b(select|show|describe|with)\b[\s\S]*$/i)?.[0]?.trim(); }
 
-
-export type ProjectRuntimeEventType = 'queued' | 'started' | 'running' | 'log' | 'heartbeat' | 'completed' | 'failed' | 'aborted';
-export interface ProjectRuntimeStatus {
-  processId: string;
-  projectId: string;
-  kind: 'build' | 'run' | 'deploy' | 'assistant';
-  status: ProjectRuntimeEventType;
-  progress: number;
-  updatedAt: string;
-  source: 'project-runtime-queue' | 'local';
-  logs: string[];
-  metadata?: Record<string, unknown>;
-}
-export interface ProjectRuntimeQueueAdapter {
-  publish?: (event: ProjectRuntimeStatus & { command?: string; payload?: unknown }) => Promise<void> | void;
-  subscribe?: (handler: (event: Partial<ProjectRuntimeStatus> & { projectId: string; processId: string; type?: ProjectRuntimeEventType; message?: string }) => void | Promise<void>) => void | Promise<() => void> | (() => void);
-  cancel?: (processId: string, reason?: string) => Promise<void> | void;
-  status?: (projectId?: string) => ProjectRuntimeStatus[] | Promise<ProjectRuntimeStatus[]>;
-  logs?: (processId: string) => unknown[] | Promise<unknown[]>;
-}
-export interface ProjectPnpmCacheConfig { localDir: string; pvcMountDir: string; storeDir: string; virtualStoreDir: string; packageImportMethod: 'hardlink' | 'copy' | 'clone'; }
-export interface SanctionedDependencyProfile { name: string; packages: string[]; description: string; }
-export const SANCTIONED_DEPENDENCY_PROFILES: SanctionedDependencyProfile[] = [
-  { name: 'ui-kit', description: 'Frontend UI kit and icons.', packages: ['@vitejs/plugin-react','vite','typescript','react','react-dom','lucide-react'] },
-  { name: 'frontend', description: 'Sanctioned browser app/runtime modules.', packages: ['@vitejs/plugin-react','vite','typescript','react','react-dom','lucide-react','zustand','@tanstack/react-query'] },
-  { name: 'backend', description: 'Server and API runtime modules.', packages: ['typescript','tsx','express','graphql','@apollo/server','zod','dotenv','kafkajs'] },
-  { name: 'threejs', description: '3D and spatial rendering modules.', packages: ['three','@react-three/fiber','@react-three/drei'] },
-  { name: 'electronjs', description: 'Desktop shell modules.', packages: ['electron','electron-builder','vite'] },
-  { name: 'big-data', description: 'Charts, dataframe, and geospatial modules.', packages: ['d3','arquero','apache-arrow','topojson-client','recharts'] },
-  { name: 'workflow-nodes', description: 'Workflow dynamic node safe modules.', packages: ['lodash','zod','d3','arquero'] },
-];
-const projectRuntimeStatuses = new Map<string, ProjectRuntimeStatus>();
-const mountedSourceSessions = new Map<string, { projectId: string; files: string[]; mountedAt: string; lastSeenAt: string; closed?: boolean }>();
-let projectRuntimeQueue: ProjectRuntimeQueueAdapter | undefined;
-let projectRuntimeQueueStop: (() => void) | undefined;
-let pnpmCacheConfig: ProjectPnpmCacheConfig = { localDir: '/tmp/giga-project-cache', pvcMountDir: '/var/lib/giga/runtime-cache', storeDir: '/var/lib/giga/runtime-cache/pnpm/store', virtualStoreDir: '/var/lib/giga/runtime-cache/pnpm/virtual', packageImportMethod: 'hardlink' };
-function projectRuntimeApply(event: Partial<ProjectRuntimeStatus> & { projectId: string; processId: string; type?: ProjectRuntimeEventType; message?: string }): ProjectRuntimeStatus {
-  const status = event.status ?? event.type ?? 'running';
-  const previous = projectRuntimeStatuses.get(event.processId);
-  const line = event.message ?? (status === 'completed' ? 'completed' : status === 'failed' ? 'failed' : status === 'queued' ? 'queued' : 'running');
-  const row: ProjectRuntimeStatus = { processId: event.processId, projectId: event.projectId, kind: event.kind ?? previous?.kind ?? 'build', status, progress: event.progress ?? (status === 'queued' ? 0 : status === 'running' || status === 'started' || status === 'heartbeat' || status === 'log' ? 50 : 100), updatedAt: nowIso(), source: event.source ?? 'project-runtime-queue', logs: [...(previous?.logs ?? []), line].slice(-500), metadata: { ...(previous?.metadata ?? {}), ...(event.metadata ?? {}) } };
-  projectRuntimeStatuses.set(row.processId, row);
-  const project = projects.get(row.projectId, { root: true });
-  if (project) {
-    const projectStatus: ProjectStatus = status === 'failed' ? 'errored' : status === 'aborted' ? 'aborted' : row.kind === 'deploy' && status === 'completed' ? 'deployed' : row.kind === 'run' ? 'running' : row.kind === 'build' ? 'building' : project.status ?? 'active';
-    try { projects.update(row.projectId, { status: projectStatus, activeProcessId: ['completed','failed','aborted'].includes(status) ? undefined : row.processId, error: status === 'failed' ? line : project.error }, { root: true }); } catch {}
-  }
-  processMonitoring?.heartbeat?.(row.processId, { status: status === 'failed' ? 'error' : status === 'aborted' ? 'stale' : 'ok', message: line, metadata: { projectId: row.projectId, kind: row.kind, source: row.source } });
-  processMonitoring?.appendLog?.(row.processId, status === 'failed' ? 'error' : 'info', line, { event: row });
-  void bus.emit('project:runtime-status', row);
-  return row;
-}
-function projectRuntimeStatus(projectId?: string): ProjectRuntimeStatus[] { const rows = [...projectRuntimeStatuses.values()]; return projectId ? rows.filter((row) => row.projectId === projectId) : rows; }
-function dependencyProfile(name: string): SanctionedDependencyProfile | undefined { return SANCTIONED_DEPENDENCY_PROFILES.find((profile) => profile.name === name); }
-function dependencyPlanForFiles(entries: Array<{ path: string; content?: string }>): { profiles: string[]; packages: string[]; rejected: string[]; cache: ProjectPnpmCacheConfig } {
-  const text = entries.map((entry) => `${entry.path}\n${entry.content ?? ''}`).join('\n').toLowerCase();
-  const profiles = new Set<string>();
-  if (/react|vite|lucide-react|\.tsx/.test(text)) profiles.add('frontend');
-  if (/three|@react-three/.test(text)) profiles.add('threejs');
-  if (/electron/.test(text)) profiles.add('electronjs');
-  if (/arquero|apache-arrow|topojson|d3|recharts/.test(text)) profiles.add('big-data');
-  if (/express|graphql|apollo|kafkajs|node:/.test(text)) profiles.add('backend');
-  const packageJsonDependencies: string[] = [];
-  for (const entry of entries) {
-    if (!entry.path.endsWith('package.json') || !entry.content) continue;
-    try {
-      const parsed = JSON.parse(entry.content) as { dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown>; peerDependencies?: Record<string, unknown>; optionalDependencies?: Record<string, unknown> };
-      packageJsonDependencies.push(...Object.keys(parsed.dependencies ?? {}), ...Object.keys(parsed.devDependencies ?? {}), ...Object.keys(parsed.peerDependencies ?? {}), ...Object.keys(parsed.optionalDependencies ?? {}));
-    } catch {
-      packageJsonDependencies.push('__invalid_package_json__');
-    }
-  }
-  for (const dep of packageJsonDependencies) {
-    if (['react','react-dom','lucide-react','vite','@vitejs/plugin-react','zustand','@tanstack/react-query'].includes(dep)) profiles.add('frontend');
-    if (['three','@react-three/fiber','@react-three/drei'].includes(dep)) profiles.add('threejs');
-    if (['electron','electron-builder'].includes(dep)) profiles.add('electronjs');
-    if (['d3','arquero','apache-arrow','topojson-client','recharts'].includes(dep)) profiles.add('big-data');
-    if (['express','graphql','@apollo/server','zod','dotenv','kafkajs','tsx'].includes(dep)) profiles.add('backend');
-    if (['lodash','zod','d3','arquero'].includes(dep)) profiles.add('workflow-nodes');
-  }
-  if (!profiles.size) profiles.add('ui-kit');
-  const packages = [...profiles].flatMap((name) => dependencyProfile(name)?.packages ?? []);
-  const imports = [
-    ...[...text.matchAll(/(?:from\s+['"]|require\(['"])([^'".][^'"]*)['"]/g)].map((match) => match[1].split('/').slice(0, match[1].startsWith('@') ? 2 : 1).join('/')),
-    ...packageJsonDependencies,
-  ];
-  const allowed = new Set(packages);
-  const rejected = [...new Set(imports.filter((name) => name !== '__invalid_package_json__' && !allowed.has(name)))];
-  if (packageJsonDependencies.includes('__invalid_package_json__')) rejected.push('__invalid_package_json__');
-  return { profiles: [...profiles], packages: [...new Set(packages)], rejected, cache: pnpmCacheConfig };
-}
 const defaultBuilderAgent: SoftwareBuilderAgent = { async run(input, context) { const actions: string[] = []; const results: unknown[] = []; let build: ProjectBuild | undefined; let deployment: ProjectDeployment | undefined; const lower = input.message.toLowerCase(); if (/build|debug|fix/.test(lower)) { build = input.build(); actions.push('build'); } const sql = extractSql(input.message); if (sql && input.databases[0]) { results.push(await input.queryDatabase(input.databases[0], sql)); actions.push('query-database'); } if (/deploy/.test(lower)) { deployment = await input.deploy(); actions.push('deploy'); } return { output: `Project assistant handled ${actions.join(', ') || 'context'} for ${input.project.name}.`, actions, processId: input.session.processId, build, deployment, queryResults: results, sourceMount: input.session.sourceMount }; } };
 
 export const Projects = {
@@ -213,72 +122,16 @@ export const Projects = {
   abort(idOrProcessId: string, reason = 'aborted by user', context: RequestContext = {}) { const project = projects.get(idOrProcessId, context); const projectId = project?.id ?? [...builds.list({ root: true }).items, ...runs.list({ root: true }).items, ...deployments.list({ root: true }).items, ...sessions.list({ root: true }).items].find((row) => 'processId' in row && row.processId === idOrProcessId)?.projectId; if (!projectId) throw new Error(`Project/process not found: ${idOrProcessId}`); const processIds = [idOrProcessId, ...builds.list({ root: true }).items.filter((row) => row.projectId === projectId).map((row) => row.processId ?? ''), ...runs.list({ root: true }).items.filter((row) => row.projectId === projectId).map((row) => row.processId ?? ''), ...deployments.list({ root: true }).items.filter((row) => row.projectId === projectId).map((row) => row.processId ?? ''), ...sessions.list({ root: true }).items.filter((row) => row.projectId === projectId).map((row) => row.processId)].filter(Boolean); for (const processId of Array.from(new Set(processIds))) processMonitoring?.abort?.(processId, reason); for (const run of runs.list({ root: true }).items.filter((row) => row.projectId === projectId && row.status === 'running')) runs.update(run.id, { status: 'aborted', logs: [...rowLogs(run), reason] }, { root: true }); const updated = projects.update(projectId, { status: 'aborted', error: reason, activeProcessId: undefined }, context); appendProjectLog(projectId, 'warn', reason, context, { aborted: true, processIds }, processIds[0]); return { project: updated, processIds, reason }; },
   appendLog: appendProjectLog,
   launcher: createStubLauncher,
-  health(): PackageHealth { return { name: '@connectingmatrix/projects', status: 'ok', checkedAt: nowIso(), details: { endpoint, projects: projects.list({ root: true }).total, files: files.list({ root: true }).total, archiveOwner: '@connectingmatrix/file', archiveProvider: Boolean(archiveAdapter()), chatBound: Boolean(chatRuntime), softwareBuilderAgent: Boolean(builderAgent), debugSink: debugLogSink ? 'clickhouse' : 'memory', databaseExecutor: Boolean(databaseExecutor), processMonitoring: Boolean(processMonitoring), runtimeQueue: Boolean(projectRuntimeQueue), runtimeStatuses: projectRuntimeStatuses.size, pnpmCache: pnpmCacheConfig, sanctionedDependencyProfiles: SANCTIONED_DEPENDENCY_PROFILES.map((profile)=>profile.name), mountedSourceSessions: mountedSourceSessions.size, deployments: deployments.list({ root: true }).total, assistantSessions: sessions.list({ root: true }).total, heartbeats: heartbeats.list({ root: true }).total, logs: logs.list({ root: true }).total, observability: PackageObservability.healthDetails() } }; },
+  health(): PackageHealth { return { name: '@connectingmatrix/projects', status: 'ok', checkedAt: nowIso(), details: { endpoint, projects: projects.list({ root: true }).total, files: files.list({ root: true }).total, archiveOwner: '@connectingmatrix/file', archiveProvider: Boolean(archiveAdapter()), chatBound: Boolean(chatRuntime), softwareBuilderAgent: Boolean(builderAgent), debugSink: debugLogSink ? 'clickhouse' : 'memory', databaseExecutor: Boolean(databaseExecutor), processMonitoring: Boolean(processMonitoring), deployments: deployments.list({ root: true }).total, assistantSessions: sessions.list({ root: true }).total, heartbeats: heartbeats.list({ root: true }).total, logs: logs.list({ root: true }).total, observability: PackageObservability.healthDetails() } }; },
 };
-
-const originalProjectBuild = Projects.build.bind(Projects);
-const originalProjectRun = Projects.run.bind(Projects);
-const originalProjectDeploy = Projects.deploy.bind(Projects);
-(Projects as unknown as { build: typeof Projects.build }).build = function buildWithRuntimeQueue(projectId: string, context: RequestContext = {}, sessionId?: string): ProjectBuild {
-  if (!projectRuntimeQueue?.publish) return originalProjectBuild(projectId, context, sessionId);
-  const project = projects.get(projectId, context);
-  if (!project) throw new Error(`Project not found: ${projectId}`);
-  const processId = registerProcess({ title: `Build ${project.name}`, targetId: `project:build:${makeId('build')}`, metadata: { projectId, runtimeQueue: true } }, context);
-  const build = builds.create({ projectId, status: 'queued', output: 'Build queued through project runtime queue', errors: [], sessionId, processId }, context);
-  projects.update(projectId, { status: 'building', activeProcessId: processId }, context);
-  const status = projectRuntimeApply({ projectId, processId, kind: 'build', status: 'queued', progress: 0, message: 'Project build queued', metadata: { buildId: build.id } });
-  void projectRuntimeQueue.publish({ ...status, command: 'build', payload: { projectId, buildId: build.id, files: filteredFiles(projectId, context).map((file) => file.path), dependencyPlan: dependencyPlanForFiles(filteredFiles(projectId, context)) } });
-  return build;
-};
-(Projects as unknown as { run: typeof Projects.run }).run = function runWithRuntimeQueue(projectId: string, context: RequestContext = {}): ProjectRun {
-  if (!projectRuntimeQueue?.publish) return originalProjectRun(projectId, context);
-  const project = projects.get(projectId, context);
-  if (!project) throw new Error(`Project not found: ${projectId}`);
-  const processId = registerProcess({ title: `Run ${project.name}`, targetId: `project:run:${makeId('run')}`, metadata: { projectId, runtimeQueue: true } }, context);
-  const run = runs.create({ projectId, status: 'running', output: 'Run queued through project runtime queue', logs: ['Run queued'], processId }, context);
-  projects.update(projectId, { status: 'running', activeProcessId: processId }, context);
-  const status = projectRuntimeApply({ projectId, processId, kind: 'run', status: 'queued', progress: 0, message: 'Project run queued', metadata: { runId: run.id } });
-  void projectRuntimeQueue.publish({ ...status, command: 'run', payload: { projectId, runId: run.id } });
-  return run;
-};
-(Projects as unknown as { deploy: typeof Projects.deploy }).deploy = async function deployWithRuntimeQueue(projectId: string, input: { buildId?: string; target?: string } = {}, context: RequestContext = {}): Promise<ProjectDeployment> {
-  if (!projectRuntimeQueue?.publish) return originalProjectDeploy(projectId, input, context);
-  const project = projects.get(projectId, context);
-  if (!project) throw new Error(`Project not found: ${projectId}`);
-  const build = input.buildId ? builds.get(input.buildId, context) : originalProjectBuild(projectId, context);
-  if (!build || (build.status !== 'passed' && build.status !== 'queued' && build.status !== 'running')) throw new Error('Deployment requires a passed or queued build');
-  const processId = registerProcess({ title: `Deploy ${project.name}`, targetId: `project:deploy:${makeId('deploy')}`, metadata: { projectId, buildId: build.id, target: input.target, runtimeQueue: true } }, context);
-  const deployment = deployments.create({ projectId, buildId: build.id, status: 'deployed', url: undefined, logs: ['Deployment queued through project runtime queue'], processId }, context);
-  projects.update(projectId, { status: 'running', activeProcessId: processId }, context);
-  const status = projectRuntimeApply({ projectId, processId, kind: 'deploy', status: 'queued', progress: 0, message: 'Project deployment queued', metadata: { deploymentId: deployment.id, target: input.target } });
-  void projectRuntimeQueue.publish({ ...status, command: 'deploy', payload: { projectId, buildId: build.id, deploymentId: deployment.id, target: input.target } });
-  return deployment;
-};
-Object.assign(Projects, {
-  bindRuntimeQueue(queue: ProjectRuntimeQueueAdapter) { projectRuntimeQueue = queue; const subscription = queue.subscribe?.((event) => { projectRuntimeApply(event); }); if (subscription && typeof (subscription as { then?: unknown }).then === 'function') void (subscription as Promise<() => void>).then((stop) => { projectRuntimeQueueStop = stop; }); else if (typeof subscription === 'function') projectRuntimeQueueStop = subscription; return Projects; },
-  stopRuntimeQueue() { projectRuntimeQueueStop?.(); projectRuntimeQueueStop = undefined; return Projects; },
-  applyRuntimeStatus(event: Partial<ProjectRuntimeStatus> & { projectId: string; processId: string; type?: ProjectRuntimeEventType; message?: string }) { return projectRuntimeApply(event); },
-  runtimeQueueStatus(projectId?: string) { return projectRuntimeStatus(projectId); },
-  queueStatus(projectId?: string) { return projectRuntimeStatus(projectId); },
-  onRuntimeStatus(handler: (row: ProjectRuntimeStatus) => void | Promise<void>) { return bus.on('project:runtime-status', handler); },
-  async abortRuntime(processId: string, reason = 'aborted by user') { await projectRuntimeQueue?.cancel?.(processId, reason); projectRuntimeApply({ projectId: projectRuntimeStatuses.get(processId)?.projectId ?? processId, processId, kind: projectRuntimeStatuses.get(processId)?.kind ?? 'build', status: 'aborted', message: reason }); return Projects.abort(processId, reason, { root: true }); },
-  configurePnpmCache(input: Partial<ProjectPnpmCacheConfig>) { pnpmCacheConfig = { ...pnpmCacheConfig, ...input }; return pnpmCacheConfig; },
-  pnpmCacheConfig() { return pnpmCacheConfig; },
-  sanctionedDependencyProfiles() { return SANCTIONED_DEPENDENCY_PROFILES; },
-  dependencyPlan(projectId: string, context: RequestContext = {}) { projects.get(projectId, context); return dependencyPlanForFiles(filteredFiles(projectId, context)); },
-  linkSanctionedModules(projectId: string, profiles?: string[], context: RequestContext = {}) { projects.get(projectId, context); const plan = profiles?.length ? { profiles, packages: [...new Set(profiles.flatMap((name) => dependencyProfile(name)?.packages ?? []))], rejected: [], cache: pnpmCacheConfig } : dependencyPlanForFiles(filteredFiles(projectId, context)); appendProjectLog(projectId, plan.rejected.length ? 'warn' : 'info', plan.rejected.length ? 'Dependency plan contains non-sanctioned modules' : 'Sanctioned dependencies linked through pnpm cache', context, plan); return { ...plan, command: `PNPM_STORE_DIR=${pnpmCacheConfig.storeDir} pnpm install --offline --package-import-method=${pnpmCacheConfig.packageImportMethod}` }; },
-  closeAssistantSession(sessionId: string, context: RequestContext = {}) { const session = sessions.get(sessionId, context); if (!session) return false; mountedSourceSessions.set(sessionId, { projectId: session.projectId, files: session.sourceMount?.files ?? [], mountedAt: session.sourceMount?.mountedAt ?? nowIso(), lastSeenAt: nowIso(), closed: true }); sessions.delete(sessionId, context); processMonitoring?.abort?.(session.processId, 'Project editing session closed'); appendProjectLog(session.projectId, 'info', 'Project editing session closed and temporary mount scheduled for cleanup', context, { sessionId }, session.processId); return true; },
-  garbageCollectSessions(input: { olderThanMs?: number; includeOpen?: boolean } = {}, context: RequestContext = {}) { const olderThanMs = input.olderThanMs ?? 30 * 60 * 1000; const now = Date.now(); let cleaned = 0; for (const session of sessions.list(context, { limit: 1000 }).items) { const age = now - Date.parse(session.updatedAt); if (input.includeOpen || age > olderThanMs) { sessions.delete(session.id, context); mountedSourceSessions.set(session.id, { projectId: session.projectId, files: session.sourceMount?.files ?? [], mountedAt: session.sourceMount?.mountedAt ?? session.createdAt, lastSeenAt: nowIso(), closed: true }); processMonitoring?.abort?.(session.processId, 'Project session garbage collected'); cleaned += 1; } } for (const [id, mount] of [...mountedSourceSessions.entries()]) { if (mount.closed && now - Date.parse(mount.lastSeenAt) > olderThanMs) mountedSourceSessions.delete(id); } return { cleaned, activeSessions: sessions.list(context, { limit: 1 }).total, retainedMounts: mountedSourceSessions.size }; },
-  mountedSourceSessions() { return [...mountedSourceSessions.entries()].map(([sessionId, mount]) => ({ sessionId, ...mount })); },
-});
 function rowLogs(row: { logs?: string[] }): string[] { return Array.isArray(row.logs) ? row.logs : []; }
 
 export const ProjectAssistant = Projects;
 export function createFileModuleArchiveProvider(provider: FileModuleArchiveProvider): FileModuleArchiveProvider { archiveProvider = provider; return provider; }
 
-export const graphql = { namespace: 'projects', typeDefs: `type Project { id: ID!, name: String!, description: String, status: String } type ProjectFile { id: ID!, projectId: ID!, path: String!, content: String! } type ProjectBuild { id: ID!, projectId: ID!, status: String!, output: String! } type ProjectAssistantSession { id: ID!, projectId: ID!, mode: String!, persistChat: Boolean! } type Query { projectsList: [Project!]!, projectFiles(projectId: ID!): [ProjectFile!]!, projectDatabases(projectId: ID!): String!, projectLogs(projectId: ID!): String!, projectRuntimeStatus(projectId: ID): String!, projectDependencyPlan(projectId: ID!): String!, projectsLauncher: String! } type Mutation { projectCreate(name: String!, description: String): Project!, projectWriteFile(projectId: ID!, path: String!, content: String!): ProjectFile!, projectBuild(projectId: ID!): ProjectBuild!, projectHeartbeat(projectId: ID!, status: String, message: String): String!, projectAbort(projectId: ID!, reason: String): String!, projectStartAssistantSession(projectId: ID!, mode: String): ProjectAssistantSession!, projectAssistantMessage(sessionId: ID!, message: String!): String! }`, resolvers: { Query: { projectsList: (_: unknown, __: unknown, ctx: RequestContext) => Projects.getList({}, ctx).items, projectFiles: (_: unknown, args: { projectId: string }, ctx: RequestContext) => Projects.listFiles(args.projectId, ctx), projectDatabases: (_: unknown, args: { projectId: string }, ctx: RequestContext) => JSON.stringify(Projects.listDatabases(args.projectId, ctx)), projectLogs: (_: unknown, args: { projectId: string }, ctx: RequestContext) => JSON.stringify(Projects.logs(args.projectId, ctx)), projectRuntimeStatus: (_: unknown, args: { projectId?: string }) => JSON.stringify((Projects as unknown as { runtimeQueueStatus: (projectId?: string)=>unknown }).runtimeQueueStatus(args.projectId)), projectDependencyPlan: (_: unknown, args: { projectId: string }, ctx: RequestContext) => JSON.stringify((Projects as unknown as { dependencyPlan: (projectId: string, context?: RequestContext)=>unknown }).dependencyPlan(args.projectId, ctx)), projectsLauncher: (_: unknown, __: unknown, ctx: RequestContext) => JSON.stringify(createStubLauncher(ctx)) }, Mutation: { projectCreate: (_: unknown, args: { name: string; description?: string }, ctx: RequestContext) => Projects.create(args, ctx), projectWriteFile: (_: unknown, args: { projectId: string; path: string; content: string }, ctx: RequestContext) => Projects.writeFile(args.projectId, args.path, args.content, ctx), projectBuild: (_: unknown, args: { projectId: string }, ctx: RequestContext) => Projects.build(args.projectId, ctx), projectHeartbeat: (_: unknown, args: { projectId: string; status?: ProjectHeartbeat['status']; message?: string }, ctx: RequestContext) => JSON.stringify(Projects.heartbeat(args.projectId, args, ctx)), projectAbort: (_: unknown, args: { projectId: string; reason?: string }, ctx: RequestContext) => JSON.stringify(Projects.abort(args.projectId, args.reason, ctx)), projectStartAssistantSession: (_: unknown, args: { projectId: string; mode?: ProjectAssistantSession['mode'] }, ctx: RequestContext) => Projects.startAssistantSession(args.projectId, { mode: args.mode }, ctx), projectAssistantMessage: async (_: unknown, args: { sessionId: string; message: string }, ctx: RequestContext) => JSON.stringify(await Projects.assistantMessage(args.sessionId, args.message, ctx)) } }, migrations: ['migrations/0001_init.sql','migrations/20260515_ai_agent_project_source_archives.sql'] };
+export const graphql = { namespace: 'projects', typeDefs: `type Project { id: ID!, name: String!, description: String, status: String } type ProjectFile { id: ID!, projectId: ID!, path: String!, content: String! } type ProjectBuild { id: ID!, projectId: ID!, status: String!, output: String! } type ProjectAssistantSession { id: ID!, projectId: ID!, mode: String!, persistChat: Boolean! } type Query { projectsList: [Project!]!, projectFiles(projectId: ID!): [ProjectFile!]!, projectDatabases(projectId: ID!): String!, projectLogs(projectId: ID!): String!, projectsLauncher: String! } type Mutation { projectCreate(name: String!, description: String): Project!, projectWriteFile(projectId: ID!, path: String!, content: String!): ProjectFile!, projectBuild(projectId: ID!): ProjectBuild!, projectHeartbeat(projectId: ID!, status: String, message: String): String!, projectAbort(projectId: ID!, reason: String): String!, projectStartAssistantSession(projectId: ID!, mode: String): ProjectAssistantSession!, projectAssistantMessage(sessionId: ID!, message: String!): String! }`, resolvers: { Query: { projectsList: (_: unknown, __: unknown, ctx: RequestContext) => Projects.getList({}, ctx).items, projectFiles: (_: unknown, args: { projectId: string }, ctx: RequestContext) => Projects.listFiles(args.projectId, ctx), projectDatabases: (_: unknown, args: { projectId: string }, ctx: RequestContext) => JSON.stringify(Projects.listDatabases(args.projectId, ctx)), projectLogs: (_: unknown, args: { projectId: string }, ctx: RequestContext) => JSON.stringify(Projects.logs(args.projectId, ctx)), projectsLauncher: (_: unknown, __: unknown, ctx: RequestContext) => JSON.stringify(createStubLauncher(ctx)) }, Mutation: { projectCreate: (_: unknown, args: { name: string; description?: string }, ctx: RequestContext) => Projects.create(args, ctx), projectWriteFile: (_: unknown, args: { projectId: string; path: string; content: string }, ctx: RequestContext) => Projects.writeFile(args.projectId, args.path, args.content, ctx), projectBuild: (_: unknown, args: { projectId: string }, ctx: RequestContext) => Projects.build(args.projectId, ctx), projectHeartbeat: (_: unknown, args: { projectId: string; status?: ProjectHeartbeat['status']; message?: string }, ctx: RequestContext) => JSON.stringify(Projects.heartbeat(args.projectId, args, ctx)), projectAbort: (_: unknown, args: { projectId: string; reason?: string }, ctx: RequestContext) => JSON.stringify(Projects.abort(args.projectId, args.reason, ctx)), projectStartAssistantSession: (_: unknown, args: { projectId: string; mode?: ProjectAssistantSession['mode'] }, ctx: RequestContext) => Projects.startAssistantSession(args.projectId, { mode: args.mode }, ctx), projectAssistantMessage: async (_: unknown, args: { sessionId: string; message: string }, ctx: RequestContext) => JSON.stringify(await Projects.assistantMessage(args.sessionId, args.message, ctx)) } }, migrations: ['migrations/0001_init.sql','migrations/20260515_ai_agent_project_source_archives.sql'] };
 
-export function createPackage(): PackageModule { return { name: '@connectingmatrix/projects', version: '0.4.0', health: () => Projects.health(), graphql, migrations: graphql.migrations, launcher: createStubLauncher, routes: [ { method: 'GET', path: '/projects/health', handler: () => Projects.health() }, { method: 'GET', path: '/projects/launcher', handler: (request) => createStubLauncher(requestContext(request)) }, { method: 'POST', path: '/projects/debug', handler: (request) => Projects.debugWithAI(String(requestBody(request).projectId ?? ''), { message: String(requestBody(request).message ?? 'debug project'), sessionId: typeof requestBody(request).sessionId === 'string' ? String(requestBody(request).sessionId) : undefined }, requestContext(request)) }, { method: 'GET', path: '/projects/runtime-status', handler: (request) => (Projects as unknown as { runtimeQueueStatus: (projectId?: string)=>unknown }).runtimeQueueStatus(String(requestBody(request).projectId ?? '')) }, { method: 'GET', path: '/projects/dependency-plan', handler: (request) => (Projects as unknown as { dependencyPlan: (projectId: string, context?: RequestContext)=>unknown }).dependencyPlan(String(requestBody(request).projectId ?? ''), requestContext(request)) }, { method: 'POST', path: '/projects/session/close', handler: (request) => (Projects as unknown as { closeAssistantSession: (sessionId: string, context?: RequestContext)=>unknown }).closeAssistantSession(String(requestBody(request).sessionId ?? ''), requestContext(request)) }, { method: 'POST', path: '/projects/gc', handler: (request) => (Projects as unknown as { garbageCollectSessions: (input?: { olderThanMs?: number; includeOpen?: boolean }, context?: RequestContext)=>unknown }).garbageCollectSessions(requestBody(request) as { olderThanMs?: number; includeOpen?: boolean }, requestContext(request)) }, { method: 'POST', path: '/projects/heartbeat', handler: (request) => Projects.heartbeat(String(requestBody(request).projectId ?? ''), requestBody(request) as { status?: ProjectHeartbeat['status']; message?: string; error?: string; processId?: string }, requestContext(request)) }, { method: 'POST', path: '/projects/abort', handler: (request) => Projects.abort(String(requestBody(request).projectId ?? requestBody(request).processId ?? ''), String(requestBody(request).reason ?? 'aborted by user'), requestContext(request)) }, { method: 'GET', path: '/projects/logs', handler: (request) => Projects.logs(String(requestBody(request).projectId ?? ''), requestContext(request)) } ], runtime: { Projects, ProjectAssistant: Projects, observability: PackageObservability } }; }
+export function createPackage(): PackageModule { return { name: '@connectingmatrix/projects', version: '0.4.0', health: () => Projects.health(), graphql, migrations: graphql.migrations, launcher: createStubLauncher, routes: [ { method: 'GET', path: '/projects/health', handler: () => Projects.health() }, { method: 'GET', path: '/projects/launcher', handler: (request) => createStubLauncher(requestContext(request)) }, { method: 'POST', path: '/projects/debug', handler: (request) => Projects.debugWithAI(String(requestBody(request).projectId ?? ''), { message: String(requestBody(request).message ?? 'debug project'), sessionId: typeof requestBody(request).sessionId === 'string' ? String(requestBody(request).sessionId) : undefined }, requestContext(request)) }, { method: 'POST', path: '/projects/heartbeat', handler: (request) => Projects.heartbeat(String(requestBody(request).projectId ?? ''), requestBody(request) as { status?: ProjectHeartbeat['status']; message?: string; error?: string; processId?: string }, requestContext(request)) }, { method: 'POST', path: '/projects/abort', handler: (request) => Projects.abort(String(requestBody(request).projectId ?? requestBody(request).processId ?? ''), String(requestBody(request).reason ?? 'aborted by user'), requestContext(request)) }, { method: 'GET', path: '/projects/logs', handler: (request) => Projects.logs(String(requestBody(request).projectId ?? ''), requestContext(request)) } ], runtime: { Projects, ProjectAssistant: Projects, observability: PackageObservability } }; }
 
 export * from './contracts.js';
 export * from './package-structure.js';

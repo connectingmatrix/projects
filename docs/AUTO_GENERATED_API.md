@@ -30,7 +30,7 @@
     "./backend/project-agent"
   ],
   "folderCounts": {
-    "src/ui": 6,
+    "src/client": 6,
     "src/backend": 18,
     "src/entity": 9,
     "migrations": 3
