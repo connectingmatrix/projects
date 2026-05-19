@@ -24,6 +24,10 @@
     "./shared/*": "./src/shared/*",
     "./common": "./src/common/index.ts",
     "./common/*": "./src/common/*",
-    "./projects": "./src/projects/index.ts"
+    "./projects": "./src/projects/index.ts",
+    "./projects/source-bundle": "./src/projects/source-bundle.ts"
+  },
+  "scripts": {
+    "lint:contracts": "node scripts/check-package-contracts.mjs"
   }
 }

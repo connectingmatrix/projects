@@ -15,6 +15,8 @@ export type AIAgentProjectRow = {
   stack?: Record<string, unknown> | null;
   architecture?: Record<string, unknown> | null;
   files?: Array<Record<string, unknown>> | null;
+  source_artifact?: Record<string, unknown> | null;
+  artifact_manifest?: Record<string, unknown> | null;
   database_manifest?: Record<string, unknown> | null;
   runtime_manifest?: Record<string, unknown> | null;
   last_run?: Record<string, unknown> | null;
@@ -60,6 +62,10 @@ export class AIAgentProjectEntity extends Entity<AIAgentProjectRow> {
   @FIELD({ type: 'object', default: {} }) public declare architecture: Record<string, unknown> | null;
 
   @FIELD({ type: 'array', default: [] }) public declare files: Array<Record<string, unknown>> | null;
+
+  @FIELD({ type: 'object', default: {} }) public declare source_artifact: Record<string, unknown> | null;
+
+  @FIELD({ type: 'object', default: {} }) public declare artifact_manifest: Record<string, unknown> | null;
 
   @FIELD({ type: 'object', default: {} }) public declare database_manifest: Record<string, unknown> | null;
 
