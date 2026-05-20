@@ -1,9 +1,10 @@
 import { RESOURCE_TYPES } from '@gigav2/types/graph.types';
 import { actionResultValue, optionalText, requireCapability, resolveTreeNodeId } from '../shared/resolve';
-import { executeTreeMutation } from '../shared/inner-graphql';
+import { executeTreeMutation, executeTreeOrm } from '../shared/inner-graphql';
 import { runReadChannel } from '../shared/read';
 import { emptyActionArtifacts, type GigaActionOutput } from '../types';
 import { PERMISSION_MATRIX } from '../shared/permissions';
+import { ChannelEntity, OrganisationEntity, UserEntity } from '@gigav2/repositories/entities';
 import type { AgentActionDefinition, AgentActionName, AgentActionRuntime } from '@gigav2/types/agent.types';
 
 const schema = (input: Record<string, unknown>) => input;
@@ -15,26 +16,30 @@ const actionDef = (name: AgentActionName, description: string, input_schema: Rec
 });
 type InputRecord = Record<string, unknown>;
 
+const entityRow = (value: any): Record<string, unknown> => ({ ...(value?.extract?.() || value?.payload || value?.data || value || {}) });
+
 const createChannelAction = async (runtime: AgentActionRuntime, input?: InputRecord): Promise<GigaActionOutput> => {
   await requireCapability(runtime, PERMISSION_MATRIX.CHANNEL.CREATE, PERMISSION_MATRIX.CHANNEL.CREATE);
   const payload = input || {};
-  const result = await executeTreeMutation<{ channel: Record<string, unknown> }>(runtime, 'gigaCreateChannel', {
-    input: {
-      organizationId: optionalText(payload, 'organizationId') || optionalText(payload, 'organization_id') || null,
-      parentChannelId: optionalText(payload, 'parentChannelId') || optionalText(payload, 'parent_channel_id') || null,
-      channel: (payload.channel || {}) as Record<string, unknown>,
+  const channelPayload = { ...((payload.channel || {}) as Record<string, unknown>) };
+  const parentChannelId = optionalText(payload, 'parentChannelId') || optionalText(payload, 'parent_channel_id') || null;
+  const organizationId = optionalText(payload, 'organizationId') || optionalText(payload, 'organization_id') || null;
+  const channel = await executeTreeOrm<Record<string, unknown>>(
+    runtime,
+    'Channels.create',
+    { input: { ...channelPayload, parentChannelId, organizationId } },
+    async () => {
+      const created = parentChannelId
+        ? await (ChannelEntity.load(parentChannelId).children as any).create(channelPayload)
+        : organizationId
+          ? await (OrganisationEntity.load(organizationId).channels as any).create(channelPayload)
+          : await (UserEntity.load().channels as any).create(channelPayload);
+      return entityRow(created);
     },
-  });
-  const channel = {
-    id: String(result.channel?.id || ''),
-    name: result.channel?.name || null,
-    slug: result.channel?.slug || null,
-    description: result.channel?.description || null,
-    organizationId: result.channel?.organizationId || null,
-  };
+  );
   return {
     summary: `Created channel "${String(channel.name || '')}".`,
-    data: { channel_id: channel.id || null, channel },
+    data: { channel_id: String(channel.id || '') || null, channel },
     ...emptyActionArtifacts,
   };
 };
@@ -53,13 +58,15 @@ const updateChannelAction = async (runtime: AgentActionRuntime, input?: InputRec
     },
     { idKey: 'id', label: 'channel', nameKeys: ['channel_name', 'channelName', 'name'], nodeType: RESOURCE_TYPES.channel, preferScopedRoot: true },
   );
-  const inputPatch: Record<string, unknown> = { id };
-  if (payload.name !== undefined) inputPatch.name = payload.name;
-  if (payload.slug !== undefined) inputPatch.slug = payload.slug;
-  if (payload.description !== undefined) inputPatch.description = payload.description;
-  if (payload.image !== undefined) inputPatch.image = payload.image;
-  if (payload.status !== undefined) inputPatch.status = payload.status;
-  const channel = await executeTreeMutation<Record<string, unknown>>(runtime, 'aiUpdateChannel', { input: inputPatch });
+  const patch: Record<string, unknown> = {};
+  if (payload.name !== undefined) patch.name = payload.name;
+  if (payload.slug !== undefined) patch.slug = payload.slug;
+  if (payload.description !== undefined) patch.description = payload.description;
+  if (payload.image !== undefined) patch.image = payload.image;
+  if (payload.status !== undefined) patch.status = payload.status;
+  const channel = await executeTreeOrm<Record<string, unknown>>(runtime, 'Channels.update', { id, input: patch }, async () =>
+    entityRow(await ChannelEntity.updateById(id, patch)),
+  );
   return { summary: `Updated channel "${String(channel.name || id)}".`, data: { channel_id: id, channel }, ...emptyActionArtifacts };
 };
 
@@ -88,7 +95,7 @@ const deleteChannelAction = async (runtime: AgentActionRuntime, input?: InputRec
         ...emptyActionArtifacts,
       };
     }
-    for (const id of ids) await executeTreeMutation<{ message: string }>(runtime, 'deleteAiChannel', { id });
+    for (const id of ids) await executeTreeOrm(runtime, 'Channels.delete', { id }, async () => ChannelEntity.deleteById(id));
     return {
       summary: `Deleted ${ids.length} channel(s) for prefix "${namePrefix}".`,
       data: { name_prefix: namePrefix, deleted_count: ids.length, deleted_channel_ids: ids },
@@ -100,10 +107,11 @@ const deleteChannelAction = async (runtime: AgentActionRuntime, input?: InputRec
     { ...payload, id: optionalText(payload, 'id') || optionalText(payload, 'channel_id') || optionalText(payload, 'channel_action_id') || '' },
     { idKey: 'id', label: 'channel', nameKeys: ['channel_name', 'channelName', 'name'], nodeType: RESOURCE_TYPES.channel, preferScopedRoot: true },
   );
-  const result = await executeTreeMutation<{ message: string }>(runtime, 'deleteAiChannel', { id });
+  const deletedCount = await executeTreeOrm<number>(runtime, 'Channels.delete', { id }, async () => ChannelEntity.deleteById(id));
+  const message = deletedCount ? `Channel ${id} deleted successfully` : `No channel found for id ${id}`;
   return {
-    summary: result.message || `Deleted channel "${id}".`,
-    data: { channel_id: id, message: result.message || null },
+    summary: message,
+    data: { channel_id: id, message },
     ...emptyActionArtifacts,
   };
 };
@@ -179,7 +187,7 @@ export const CHANNEL_TREE_ACTION_CATALOG: AgentActionDefinition[] = [
   ),
   actionDef(
     'create_channel',
-    'Create a channel.',
+    'Create a channel under the current user, an organization, or a parent channel.',
     schema({ organizationId: 'uuid optional', parentChannelId: 'uuid optional', channel: '{name,slug,description?}' }),
   ),
   actionDef(
@@ -187,6 +195,7 @@ export const CHANNEL_TREE_ACTION_CATALOG: AgentActionDefinition[] = [
     'Update channel fields.',
     schema({
       id: 'uuid optional',
+      channel_id: 'uuid optional',
       channel_action_id: 'action id optional',
       channel_name: 'string optional',
       name: 'string optional',
@@ -198,40 +207,39 @@ export const CHANNEL_TREE_ACTION_CATALOG: AgentActionDefinition[] = [
   ),
   actionDef(
     'delete_channel',
-    'Delete one channel branch, or multiple channels by name_prefix.',
+    'Delete a channel by id/name, or delete all matched channels by name_prefix.',
     schema({
       id: 'uuid optional',
+      channel_id: 'uuid optional',
+      channel_action_id: 'action id optional',
       channel_name: 'string optional',
-      channelName: 'string optional',
       name: 'string optional',
       name_prefix: 'string optional',
-      namePrefix: 'string optional',
-      prefix: 'string optional',
       organization_id: 'uuid optional',
     }),
   ),
   actionDef(
     'link_channel',
-    'Link a child channel under a parent channel.',
+    'Link an existing channel below another channel.',
     schema({
       parent_channel_id: 'uuid optional',
-      parent_channel_name: 'string optional',
       parent_channel_action_id: 'action id optional',
+      parent_channel_name: 'string optional',
       channel_id: 'uuid optional',
-      channel_name: 'string optional',
       channel_action_id: 'action id optional',
+      channel_name: 'string optional',
     }),
   ),
   actionDef(
     'unlink_channel',
-    'Remove a channel link under a parent channel.',
+    'Remove a shared channel link without deleting either channel.',
     schema({
       parent_channel_id: 'uuid optional',
-      parent_channel_name: 'string optional',
       parent_channel_action_id: 'action id optional',
+      parent_channel_name: 'string optional',
       channel_id: 'uuid optional',
-      channel_name: 'string optional',
       channel_action_id: 'action id optional',
+      channel_name: 'string optional',
     }),
   ),
 ];

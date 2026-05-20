@@ -1,9 +1,10 @@
 import { RESOURCE_TYPES } from '@gigav2/types/graph.types';
 import { actionResultValue, optionalText, requireCapability, resolveTreeNodeId } from '../shared/resolve';
-import { executeTreeMutation } from '../shared/inner-graphql';
+import { executeTreeMutation, executeTreeOrm } from '../shared/inner-graphql';
 import { runReadCategory } from '../shared/read';
 import { emptyActionArtifacts, type GigaActionOutput } from '../types';
 import { PERMISSION_MATRIX } from '../shared/permissions';
+import { CategoryEntity, ChannelEntity } from '@gigav2/repositories/entities';
 import type { AgentActionDefinition, AgentActionName, AgentActionRuntime } from '@gigav2/types/agent.types';
 
 type InputRecord = Record<string, unknown>;
@@ -15,20 +16,29 @@ const actionDef = (name: AgentActionName, description: string, input_schema: Rec
   input_schema,
   mutating,
 });
+const entityRow = (value: any): Record<string, unknown> => ({ ...(value?.extract?.() || value?.payload || value?.data || value || {}) });
 
 const createCategoryAction = async (runtime: AgentActionRuntime, input?: InputRecord): Promise<GigaActionOutput> => {
   await requireCapability(runtime, PERMISSION_MATRIX.CATEGORY.CREATE, PERMISSION_MATRIX.CATEGORY.CREATE);
   const payload = input || {};
-  const result = await executeTreeMutation<{ category: Record<string, unknown> }>(runtime, 'aiCreateCategory', {
-    input: {
-      parentChannelId: optionalText(payload, 'parentChannelId') || optionalText(payload, 'parent_channel_id') || null,
-      parentCategoryId: optionalText(payload, 'parentCategoryId') || optionalText(payload, 'parent_category_id') || null,
-      category: (payload.category || {}) as Record<string, unknown>,
+  const parentChannelId = optionalText(payload, 'parentChannelId') || optionalText(payload, 'parent_channel_id') || null;
+  const parentCategoryId = optionalText(payload, 'parentCategoryId') || optionalText(payload, 'parent_category_id') || null;
+  if (Boolean(parentChannelId) === Boolean(parentCategoryId)) throw new Error('Exactly one category parent is required.');
+  const categoryPayload = { ...((payload.category || {}) as Record<string, unknown>) };
+  const category = await executeTreeOrm<Record<string, unknown>>(
+    runtime,
+    'Categories.create',
+    { input: { ...categoryPayload, parentChannelId, parentCategoryId } },
+    async () => {
+      const created = parentCategoryId
+        ? await (CategoryEntity.load(parentCategoryId).categories as any).create(categoryPayload)
+        : await (ChannelEntity.load(parentChannelId || '').categories as any).create(categoryPayload);
+      return entityRow(created);
     },
-  });
+  );
   return {
-    summary: `Created category "${String(result.category?.name || '')}".`,
-    data: { category_id: result.category?.id || null, category: result.category },
+    summary: `Created category "${String(category.name || '')}".`,
+    data: { category_id: category.id || null, category },
     ...emptyActionArtifacts,
   };
 };
@@ -47,13 +57,15 @@ const updateCategoryAction = async (runtime: AgentActionRuntime, input?: InputRe
     },
     { idKey: 'id', label: 'category', nameKeys: ['category_name', 'category', 'name'], nodeType: RESOURCE_TYPES.category, preferScopedRoot: true },
   );
-  const inputPatch: Record<string, unknown> = { id };
-  if (payload.name !== undefined) inputPatch.name = payload.name;
-  if (payload.slug !== undefined) inputPatch.slug = payload.slug;
-  if (payload.description !== undefined) inputPatch.description = payload.description;
-  if (payload.image !== undefined) inputPatch.image = payload.image;
-  if (payload.status !== undefined) inputPatch.status = payload.status;
-  const category = await executeTreeMutation<Record<string, unknown>>(runtime, 'aiUpdateCategory', { input: inputPatch });
+  const patch: Record<string, unknown> = {};
+  if (payload.name !== undefined) patch.name = payload.name;
+  if (payload.slug !== undefined) patch.slug = payload.slug;
+  if (payload.description !== undefined) patch.description = payload.description;
+  if (payload.image !== undefined) patch.image = payload.image;
+  if (payload.status !== undefined) patch.status = payload.status;
+  const category = await executeTreeOrm<Record<string, unknown>>(runtime, 'Categories.update', { id, input: patch }, async () =>
+    entityRow(await CategoryEntity.updateById(id, patch)),
+  );
   return { summary: `Updated category "${String(category.name || id)}".`, data: { category_id: id, category }, ...emptyActionArtifacts };
 };
 
@@ -68,10 +80,11 @@ const deleteCategoryAction = async (runtime: AgentActionRuntime, input?: InputRe
     },
     { idKey: 'id', label: 'category', nameKeys: ['category_name', 'category', 'name'], nodeType: RESOURCE_TYPES.category, preferScopedRoot: true },
   );
-  const result = await executeTreeMutation<{ message: string }>(runtime, 'deleteAiCategory', { id });
+  const deletedCount = await executeTreeOrm<number>(runtime, 'Categories.delete', { id }, async () => CategoryEntity.deleteById(id));
+  const message = deletedCount ? `Category ${id} deleted successfully` : `No category found for id ${id}`;
   return {
-    summary: result.message || `Deleted category "${id}".`,
-    data: { category_id: id, message: result.message || null },
+    summary: message,
+    data: { category_id: id, message },
     ...emptyActionArtifacts,
   };
 };
@@ -169,7 +182,7 @@ export const CATEGORY_TREE_ACTION_CATALOG: AgentActionDefinition[] = [
   ),
   actionDef(
     'delete_category',
-    'Delete a category branch.',
+    'Delete a category.',
     schema({
       id: 'uuid optional',
       category_action_id: 'action id optional',
@@ -180,7 +193,7 @@ export const CATEGORY_TREE_ACTION_CATALOG: AgentActionDefinition[] = [
   ),
   actionDef(
     'link_category',
-    'Link a category to one or more channels.',
+    'Link an existing category into one or more channels.',
     schema({
       category_id: 'uuid optional',
       category_action_id: 'action id optional',

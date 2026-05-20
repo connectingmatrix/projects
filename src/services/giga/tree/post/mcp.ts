@@ -1,8 +1,9 @@
 import { RESOURCE_TYPES } from '@gigav2/types/graph.types';
 import { actionResultValue, optionalText, requireCapability, resolvePostId, resolveTreeNodeId } from '../shared/resolve';
-import { executeTreeMutation, executeTreeQuery } from '../shared/inner-graphql';
+import { executeTreeOrm } from '../shared/inner-graphql';
 import { emptyActionArtifacts, type GigaActionOutput } from '../types';
 import { PERMISSION_MATRIX } from '../shared/permissions';
+import { PostEntity, SubjectEntity } from '@gigav2/repositories/entities';
 import type { AgentActionDefinition, AgentActionName, AgentActionRuntime } from '@gigav2/types/agent.types';
 
 type InputRecord = Record<string, unknown>;
@@ -14,6 +15,7 @@ const actionDef = (name: AgentActionName, description: string, input_schema: Rec
   input_schema,
   mutating,
 });
+const entityRow = (value: any): Record<string, unknown> => ({ ...(value?.extract?.() || value?.payload || value?.data || value || {}) });
 
 const readPostAction = async (runtime: AgentActionRuntime, input?: InputRecord): Promise<GigaActionOutput> => {
   await requireCapability(runtime, PERMISSION_MATRIX.POST.READ, PERMISSION_MATRIX.POST.READ);
@@ -23,7 +25,10 @@ const readPostAction = async (runtime: AgentActionRuntime, input?: InputRecord):
     titleKeys: ['post_title', 'title', 'name'],
     actionKeys: ['post_action_id'],
   });
-  const post = await executeTreeQuery<Record<string, unknown> | null>(runtime, 'aiReadPost', { input: { id } });
+  const post = await executeTreeOrm<Record<string, unknown> | null>(runtime, 'Posts.read', { id }, async () => {
+    const row = await PostEntity.single(id);
+    return row ? entityRow(row) : null;
+  });
   return {
     summary: post ? `Read post "${String(post.title || id)}".` : `No post found for id ${id}.`,
     data: { post_id: id, post },
@@ -35,8 +40,12 @@ const readAttachmentsAction = async (runtime: AgentActionRuntime, input?: InputR
   await requireCapability(runtime, PERMISSION_MATRIX.POST.ATTACHMENTS, PERMISSION_MATRIX.POST.ATTACHMENTS);
   const payload = input || {};
   const id = await resolvePostId(runtime, payload, { idKeys: ['post_id', 'id'], titleKeys: ['post_title', 'title'], actionKeys: ['post_action_id'] });
-  const attachments = await executeTreeQuery<Array<Record<string, unknown>>>(runtime, 'aiReadAttachments', {
-    input: { post_id: id, attachment_id: optionalText(payload, 'attachment_id') || null },
+  const attachments = await executeTreeOrm<Array<Record<string, unknown>>>(runtime, 'Posts.Attachments.list', { id }, async () => {
+    const rows = await (PostEntity.load(id).attachments as any).list(undefined, { orderBy: 'created_at', ascending: true });
+    const attachmentId = optionalText(payload, 'attachment_id') || null;
+    return rows
+      .map((row: any) => entityRow(row))
+      .filter((row: Record<string, unknown>) => !attachmentId || String(row.id || '') === attachmentId);
   });
   return { summary: `Read ${attachments.length} attachment(s) for post "${id}".`, data: { post_id: id, attachments }, ...emptyActionArtifacts };
 };
@@ -44,14 +53,18 @@ const readAttachmentsAction = async (runtime: AgentActionRuntime, input?: InputR
 const createPostAction = async (runtime: AgentActionRuntime, input?: InputRecord): Promise<GigaActionOutput> => {
   await requireCapability(runtime, PERMISSION_MATRIX.POST.CREATE, PERMISSION_MATRIX.POST.CREATE);
   const payload = input || {};
-  const post = await executeTreeMutation<Record<string, unknown> | null>(runtime, 'createAiPost', {
-    input: {
-      subject_id: payload.subject_id,
-      title: payload.title,
-      narrative: payload.narrative,
-      metadata: payload.metadata,
-    },
-  });
+  const subjectId = String(payload.subject_id || '').trim();
+  const postPayload = {
+    title: payload.title,
+    narrative: payload.narrative,
+    metadata: payload.metadata,
+  };
+  const post = await executeTreeOrm<Record<string, unknown> | null>(
+    runtime,
+    'Posts.create',
+    { input: { ...postPayload, subject_id: subjectId } },
+    async () => entityRow(await (SubjectEntity.load(subjectId).posts as any).create(postPayload)),
+  );
   return {
     summary: `Created post "${String(post?.title || payload.title || '')}".`,
     data: { post: post || null, post_id: post?.id || null },
@@ -77,12 +90,14 @@ const updatePostAction = async (runtime: AgentActionRuntime, input?: InputRecord
         { idKey: 'id', label: 'subject', nameKeys: ['subject_name', 'subject'], nodeType: RESOURCE_TYPES.subject, preferScopedRoot: true },
       )
     : null;
-  const patch: Record<string, unknown> = { id };
+  const patch: Record<string, unknown> = {};
   if (payload.title !== undefined) patch.title = payload.title;
   if (payload.narrative !== undefined) patch.narrative = payload.narrative;
   if (payload.metadata !== undefined) patch.metadata = payload.metadata;
   if (subjectId) patch.subject_id = subjectId;
-  const post = await executeTreeMutation<Record<string, unknown> | null>(runtime, 'aiUpdatePost', { input: patch });
+  const post = await executeTreeOrm<Record<string, unknown> | null>(runtime, 'Posts.update', { id, input: patch }, async () =>
+    entityRow(await PostEntity.updateById(id, patch)),
+  );
   return { summary: `Updated post "${String(post?.title || id)}".`, data: { post_id: id, post: post || null }, ...emptyActionArtifacts };
 };
 
@@ -94,8 +109,9 @@ const deletePostAction = async (runtime: AgentActionRuntime, input?: InputRecord
     titleKeys: ['post_title', 'title', 'name'],
     actionKeys: ['post_action_id'],
   });
-  const result = await executeTreeMutation<{ message: string }>(runtime, 'deleteAiPost', { id });
-  return { summary: result.message || `Deleted post "${id}".`, data: { post_id: id, message: result.message || null }, ...emptyActionArtifacts };
+  const deletedCount = await executeTreeOrm<number>(runtime, 'Posts.delete', { id }, async () => PostEntity.deleteById(id));
+  const message = deletedCount ? `Post ${id} deleted successfully` : `No post found for id ${id}`;
+  return { summary: message, data: { post_id: id, message }, ...emptyActionArtifacts };
 };
 
 export const POST_TREE_READ_ACTION_NAMES: AgentActionName[] = ['read_post', 'read_attachments'];

@@ -55,3 +55,10 @@ export const executeTreeQuery = <T>(runtime: AgentActionRuntime, operationName: 
 
 export const executeTreeMutation = <T>(runtime: AgentActionRuntime, operationName: string, payload: Record<string, unknown>) =>
   executeGraphqlOperation<T>(GraphQLOperationType.MUTATION, operationName, runtime, payload);
+
+export const executeTreeOrm = <T>(
+  runtime: AgentActionRuntime,
+  operationName: string,
+  payload: Record<string, unknown>,
+  callback: () => Promise<T> | T,
+) => withEntityRequestContext(graphqlContext(runtime, operationName, payload), payload, callback);

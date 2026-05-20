@@ -1,9 +1,10 @@
 import { RESOURCE_TYPES } from '@gigav2/types/graph.types';
 import { actionResultValue, optionalText, requireCapability, resolveTreeNodeId } from '../shared/resolve';
-import { executeTreeMutation } from '../shared/inner-graphql';
+import { executeTreeMutation, executeTreeOrm } from '../shared/inner-graphql';
 import { runReadSubject } from '../shared/read';
 import { emptyActionArtifacts, type GigaActionOutput } from '../types';
 import { PERMISSION_MATRIX } from '../shared/permissions';
+import { CategoryEntity, SubjectEntity } from '@gigav2/repositories/entities';
 import type { AgentActionDefinition, AgentActionName, AgentActionRuntime } from '@gigav2/types/agent.types';
 
 type InputRecord = Record<string, unknown>;
@@ -15,22 +16,31 @@ const actionDef = (name: AgentActionName, description: string, input_schema: Rec
   input_schema,
   mutating,
 });
+const entityRow = (value: any): Record<string, unknown> => ({ ...(value?.extract?.() || value?.payload || value?.data || value || {}) });
 
 const createSubjectAction = async (runtime: AgentActionRuntime, input?: InputRecord): Promise<GigaActionOutput> => {
   await requireCapability(runtime, PERMISSION_MATRIX.SUBJECT.CREATE, PERMISSION_MATRIX.SUBJECT.CREATE);
   const payload = input || {};
-  const categoryId = optionalText(payload, 'categoryId') || optionalText(payload, 'category_id');
-  const parentSubjectId = optionalText(payload, 'parentSubjectId') || optionalText(payload, 'parent_subject_id');
-  const subject = await executeTreeMutation<Record<string, unknown>>(runtime, 'createAiSubject', {
-    input: {
-      name: payload.name,
-      categoryId: categoryId || null,
-      parentSubjectId: parentSubjectId || null,
-      description: payload.description,
-      metadata: payload.metadata,
-      summary: payload.summary,
+  const categoryId = optionalText(payload, 'categoryId') || optionalText(payload, 'category_id') || null;
+  const parentSubjectId = optionalText(payload, 'parentSubjectId') || optionalText(payload, 'parent_subject_id') || null;
+  if (Boolean(categoryId) === Boolean(parentSubjectId)) throw new Error('Exactly one subject parent is required.');
+  const subjectPayload = {
+    name: payload.name,
+    description: payload.description || null,
+    metadata: (payload.metadata || {}) as Record<string, unknown>,
+    summary: payload.summary || null,
+  };
+  const subject = await executeTreeOrm<Record<string, unknown>>(
+    runtime,
+    'SubjectRefs.create',
+    { input: { ...subjectPayload, categoryId, parentSubjectId } },
+    async () => {
+      const created = categoryId
+        ? await (CategoryEntity.load(categoryId).subjects as any).create(subjectPayload)
+        : await (SubjectEntity.load(parentSubjectId || '').subjects as any).create(subjectPayload);
+      return entityRow(created);
     },
-  });
+  );
   const subjectId = String(subject.id || '');
   return {
     summary: `Created subject "${String(subject.name || payload.name || '')}".`,
@@ -53,11 +63,13 @@ const updateSubjectAction = async (runtime: AgentActionRuntime, input?: InputRec
     },
     { idKey: 'id', label: 'subject', nameKeys: ['subject_name', 'subject', 'name'], nodeType: RESOURCE_TYPES.subject, preferScopedRoot: true },
   );
-  const inputPatch: Record<string, unknown> = { id };
-  if (payload.name !== undefined) inputPatch.name = payload.name;
-  if (payload.description !== undefined) inputPatch.description = payload.description;
-  if (payload.metadata !== undefined) inputPatch.metadata = payload.metadata;
-  const subject = await executeTreeMutation<Record<string, unknown>>(runtime, 'aiUpdateSubject', { input: inputPatch });
+  const patch: Record<string, unknown> = {};
+  if (payload.name !== undefined) patch.name = payload.name;
+  if (payload.description !== undefined) patch.description = payload.description;
+  if (payload.metadata !== undefined) patch.metadata = payload.metadata;
+  const subject = await executeTreeOrm<Record<string, unknown>>(runtime, 'SubjectRefs.update', { id, input: patch }, async () =>
+    entityRow(await SubjectEntity.updateById(id, patch)),
+  );
   return { summary: `Updated subject "${String(subject.name || id)}".`, data: { subject_id: id, subject }, ...emptyActionArtifacts };
 };
 
@@ -72,10 +84,11 @@ const deleteSubjectAction = async (runtime: AgentActionRuntime, input?: InputRec
     },
     { idKey: 'id', label: 'subject', nameKeys: ['subject_name', 'subject', 'name'], nodeType: RESOURCE_TYPES.subject, preferScopedRoot: true },
   );
-  const result = await executeTreeMutation<{ message: string }>(runtime, 'deleteAiSubject', { id });
+  const deletedCount = await executeTreeOrm<number>(runtime, 'SubjectRefs.delete', { id }, async () => SubjectEntity.deleteById(id));
+  const message = deletedCount ? `Subject ${id} deleted successfully` : `No subject found for id ${id}`;
   return {
-    summary: result.message || `Deleted subject "${id}".`,
-    data: { subject_id: id, message: result.message || null },
+    summary: message,
+    data: { subject_id: id, message },
     ...emptyActionArtifacts,
   };
 };
