@@ -1,6 +1,6 @@
 import { BadRequestError } from 'routing-controllers';
 import { toSafeString } from 'giga-ai-helper';
-import { PostEntity } from '@gigav2/repositories/entities/tree/Post';
+import { PostEntity } from '@connectingmatrix/orm/entities/tree/Post';
 import { fetchUserTree } from './fetchUserTree';
 import { runFetchUserTree } from './fetch';
 import {

@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
-const requiredFiles = ['src/projects/source-bundle.ts', 'src/projects/index.ts', 'src/entities/AIAgentProjectEntity.ts'];
+const requiredFiles = ['src/projects/source-bundle.ts', 'src/projects/index.ts'];
 for (const file of requiredFiles) {
   if (!fs.existsSync(path.join(root, file))) throw new Error(`Missing ${file}`);
 }
-const entity = fs.readFileSync(path.join(root, 'src/entities/AIAgentProjectEntity.ts'), 'utf8');
+const entity = fs.readFileSync(path.join(root, '../giga-orm/src/entities/AIAgentProjectEntity.ts'), 'utf8');
 for (const field of ['source_artifact', 'artifact_manifest']) {
   if (!entity.includes(field)) throw new Error(`Project entity is missing ${field}`);
 }

@@ -1,9 +1,9 @@
 import { unique } from 'giga-ai-helper';
 import { ResolvedSubjectFilter, SubjectFilterInput } from '@gigav2/types/graphql.types';
 import { getScopedLogger, toErrorMeta } from '@gigav2/lib/logger';
-import { Subject } from '@gigav2/repositories/entities/tree/Subject';
-import { TagEntity } from '@gigav2/repositories/entities/TagEntity';
-import { SubjectTagEntity } from '@gigav2/repositories/entities/SubjectTagEntity';
+import { Subject } from '@connectingmatrix/orm/entities/tree/Subject';
+import { TagEntity } from '@connectingmatrix/orm/entities/TagEntity';
+import { SubjectTagEntity } from '@connectingmatrix/orm/entities/SubjectTagEntity';
 
 const logger = getScopedLogger('agent-subject-filter-service');
 

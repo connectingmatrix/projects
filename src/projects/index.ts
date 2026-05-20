@@ -1,4 +1,4 @@
-export * from '../entities/AIAgentProjectEntity';
-export * from '../entities/SharedSpaceEntity';
-export * from '../entities/SharedSpaceCatalogEntity';
+export * from '@connectingmatrix/orm/entities/AIAgentProjectEntity';
+export * from '@connectingmatrix/orm/entities/SharedSpaceEntity';
+export * from '@connectingmatrix/orm/entities/SharedSpaceCatalogEntity';
 export * from './source-bundle';

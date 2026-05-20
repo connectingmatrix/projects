@@ -11,8 +11,8 @@ import {
 } from 'giga-ai-helper';
 import { EnvLoader } from '@gigav2/lib/env';
 import { openai } from '@gigav2/services/common/openai-client';
-import { SubjectTagEntity, TagEntity } from '@gigav2/repositories/entities';
-import { Subject } from '@gigav2/repositories/entities/tree/Subject';
+import { SubjectTagEntity, TagEntity } from '@connectingmatrix/orm/entities';
+import { Subject } from '@connectingmatrix/orm/entities/tree/Subject';
 import type { TagCandidate } from '@gigav2/types/subject.types';
 
 const DEFAULT_RESPONSE_MODEL = 'gpt-4.1-mini';

@@ -1,5 +1,5 @@
 import { SupabaseClient } from '@supabase/supabase-js';
-import { SubjectEntity } from '@gigav2/repositories/entities';
+import { SubjectEntity } from '@connectingmatrix/orm/entities';
 import { SubjectFilterInput } from '@gigav2/types/graphql.types';
 
 export function resolveSubjectIds(supabase: SupabaseClient, filter?: SubjectFilterInput) {

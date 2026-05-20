@@ -4,7 +4,7 @@ import { executeTreeMutation, executeTreeOrm } from '../shared/inner-graphql';
 import { runReadCategory } from '../shared/read';
 import { emptyActionArtifacts, type GigaActionOutput } from '../types';
 import { PERMISSION_MATRIX } from '../shared/permissions';
-import { CategoryEntity, ChannelEntity } from '@gigav2/repositories/entities';
+import { CategoryEntity, ChannelEntity } from '@connectingmatrix/orm/entities';
 import type { AgentActionDefinition, AgentActionName, AgentActionRuntime } from '@gigav2/types/agent.types';
 
 type InputRecord = Record<string, unknown>;

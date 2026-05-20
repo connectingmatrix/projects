@@ -2,7 +2,7 @@ import { BadRequestError } from 'routing-controllers';
 import { readUserMatrixState } from '@gigav2/manifest/user-matrix';
 import { buildPermissionContext } from '@gigav2/services/auth/permission-context';
 import { fetchUserTree, resolveAccessibleTreeNode } from '@gigav2/services/giga/tree/fetchUserTree';
-import { Post } from '@gigav2/repositories/entities/tree/Post';
+import { Post } from '@connectingmatrix/orm/entities/tree/Post';
 import { AgentActionCapability, AgentActionRuntime, AgentActionResult } from '@gigav2/types/agent.types';
 import { RESOURCE_TYPES, ResourceType, TreeNode } from '@gigav2/types/graph.types';
 

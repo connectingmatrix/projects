@@ -1,7 +1,7 @@
 import { BadRequestError } from 'routing-controllers';
-import { OrganisationEntity } from '@gigav2/repositories/entities';
+import { OrganisationEntity } from '@connectingmatrix/orm/entities';
 import { TreeGraphEntity } from '@gigav2/services/giga/tree/system';
-import { Subject } from '@gigav2/repositories/entities/tree/Subject';
+import { Subject } from '@connectingmatrix/orm/entities/tree/Subject';
 import { fetchUserTree } from '@gigav2/services/giga/tree/fetchUserTree';
 import { AgentActionCapability, AgentActionRuntime } from '@gigav2/types/agent.types';
 import { GRAPH_LABELS, RESOURCE_TYPES, ResourceType, TreeNode } from '@gigav2/types/graph.types';

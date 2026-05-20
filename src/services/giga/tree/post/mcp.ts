@@ -3,7 +3,7 @@ import { actionResultValue, optionalText, requireCapability, resolvePostId, reso
 import { executeTreeOrm } from '../shared/inner-graphql';
 import { emptyActionArtifacts, type GigaActionOutput } from '../types';
 import { PERMISSION_MATRIX } from '../shared/permissions';
-import { PostEntity, SubjectEntity } from '@gigav2/repositories/entities';
+import { PostEntity, SubjectEntity } from '@connectingmatrix/orm/entities';
 import type { AgentActionDefinition, AgentActionName, AgentActionRuntime } from '@gigav2/types/agent.types';
 
 type InputRecord = Record<string, unknown>;
