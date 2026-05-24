@@ -898,12 +898,14 @@ export async function fetchUserTree(supabase: SupabaseClient, input: FetchUserTr
           nowIso,
         })
       : Promise.resolve([]),
-    loadRootGrants(neo, {
-      userPermissionsId: input.userPermissionsId,
-      rootId: input.rootId,
-      nowIso,
-    }),
-    input.includeGlobal === false
+    organizationId
+      ? Promise.resolve([])
+      : loadRootGrants(neo, {
+          userPermissionsId: input.userPermissionsId,
+          rootId: input.rootId,
+          nowIso,
+        }),
+    input.includeGlobal === false || organizationId
       ? Promise.resolve([])
       : loadRootGrants(neo, {
           userPermissionsId: GRAPH_SYSTEM_IDS.userGlobal,
