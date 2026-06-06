@@ -9,7 +9,8 @@
     "@connectingmatrix/file-service": "link:../giga-file-service",
     "@supabase/supabase-js": "^2.50.4",
     "neogma": "^1.16.1",
-    "lodash": "^4.17.21"
+    "lodash": "^4.17.21",
+    "routing-controllers": "^0.9.0"
   },
   "exports": {
     ".": "./src/index.ts",
