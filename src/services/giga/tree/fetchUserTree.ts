@@ -314,14 +314,19 @@ function buildBatchedGraphQuery(maxDepth: number): string {
     MATCH (root {id: rootRef.rootId})
     WHERE rootRef.rootLabel IN labels(root)
     OPTIONAL MATCH path = (root)-[pathRels:${STRUCTURAL_RELATION_TRAVERSAL}*0..${maxDepth}]->(reachable)
-    WHERE reachable IS NULL OR ALL(node IN nodes(path) WHERE ANY(label IN labels(node) WHERE label IN $include))
+    WHERE reachable IS NULL OR (
+      ALL(node IN nodes(path) WHERE ANY(label IN labels(node) WHERE label IN $include))
+      AND ALL(rel IN relationships(path) WHERE type(rel) <> 'CONTAINS_CATEGORY' OR rootRef.rootLabel <> 'Channel' OR startNode(rel) = root OR rootRef.rootId IN coalesce(rel.channelIds, []))
+    )
     WITH rootRef, root, collect(DISTINCT reachable) AS reachedNodes
     WITH rootRef, [root] + reachedNodes AS rawNodes
     UNWIND rawNodes AS rawNode
     WITH rootRef, collect(DISTINCT rawNode) AS nodes
     UNWIND nodes AS node
     OPTIONAL MATCH (node)-[rel]->(child)
-    WHERE child IN nodes AND type(rel) IN $relations
+    WHERE child IN nodes
+      AND type(rel) IN $relations
+      AND (type(rel) <> 'CONTAINS_CATEGORY' OR rootRef.rootLabel <> 'Channel' OR node = root OR rootRef.rootId IN coalesce(rel.channelIds, []))
     RETURN
       rootRef.rootId AS rootId,
       [n IN nodes | {id: n.id, labels: labels(n), props: properties(n)}] AS nodes,
@@ -342,14 +347,19 @@ function buildGroupedGraphQuery(rootLabel: string, maxDepth: number): string {
     UNWIND $rootIds AS rootId
     MATCH (root:${rootLabel} {id: rootId})
     OPTIONAL MATCH path = (root)-[pathRels:${STRUCTURAL_RELATION_TRAVERSAL}*0..${maxDepth}]->(reachable)
-    WHERE reachable IS NULL OR ALL(node IN nodes(path) WHERE ANY(label IN labels(node) WHERE label IN $include))
+    WHERE reachable IS NULL OR (
+      ALL(node IN nodes(path) WHERE ANY(label IN labels(node) WHERE label IN $include))
+      AND ALL(rel IN relationships(path) WHERE type(rel) <> 'CONTAINS_CATEGORY' OR '${rootLabel}' <> 'Channel' OR startNode(rel) = root OR rootId IN coalesce(rel.channelIds, []))
+    )
     WITH rootId, root, collect(DISTINCT reachable) AS reachedNodes
     WITH rootId, [root] + reachedNodes AS rawNodes
     UNWIND rawNodes AS rawNode
     WITH rootId, collect(DISTINCT rawNode) AS nodes
     UNWIND nodes AS node
     OPTIONAL MATCH (node)-[rel]->(child)
-    WHERE child IN nodes AND type(rel) IN $relations
+    WHERE child IN nodes
+      AND type(rel) IN $relations
+      AND (type(rel) <> 'CONTAINS_CATEGORY' OR '${rootLabel}' <> 'Channel' OR node = root OR rootId IN coalesce(rel.channelIds, []))
     RETURN
       rootId,
       [n IN nodes | {id: n.id, labels: labels(n), props: properties(n)}] AS nodes,
