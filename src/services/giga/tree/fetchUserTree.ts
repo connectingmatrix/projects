@@ -316,7 +316,7 @@ function buildBatchedGraphQuery(maxDepth: number): string {
     OPTIONAL MATCH path = (root)-[pathRels:${STRUCTURAL_RELATION_TRAVERSAL}*0..${maxDepth}]->(reachable)
     WHERE reachable IS NULL OR (
       ALL(node IN nodes(path) WHERE ANY(label IN labels(node) WHERE label IN $include))
-      AND ALL(rel IN relationships(path) WHERE type(rel) <> 'CONTAINS_CATEGORY' OR rootRef.rootLabel <> 'Channel' OR startNode(rel) = root OR rootRef.rootId IN coalesce(rel.channelIds, []))
+      AND ALL(rel IN relationships(path) WHERE (type(rel) <> 'CONTAINS_CATEGORY' AND type(rel) <> 'CONTAINS_SUBJECT') OR rootRef.rootLabel <> 'Channel' OR startNode(rel) = root OR rootRef.rootId IN coalesce(rel.channelIds, []))
     )
     WITH rootRef, root, collect(DISTINCT reachable) AS reachedNodes
     WITH rootRef, [root] + reachedNodes AS rawNodes
@@ -326,7 +326,7 @@ function buildBatchedGraphQuery(maxDepth: number): string {
     OPTIONAL MATCH (node)-[rel]->(child)
     WHERE child IN nodes
       AND type(rel) IN $relations
-      AND (type(rel) <> 'CONTAINS_CATEGORY' OR rootRef.rootLabel <> 'Channel' OR node = root OR rootRef.rootId IN coalesce(rel.channelIds, []))
+      AND ((type(rel) <> 'CONTAINS_CATEGORY' AND type(rel) <> 'CONTAINS_SUBJECT') OR rootRef.rootLabel <> 'Channel' OR node = root OR rootRef.rootId IN coalesce(rel.channelIds, []))
     RETURN
       rootRef.rootId AS rootId,
       [n IN nodes | {id: n.id, labels: labels(n), props: properties(n)}] AS nodes,
@@ -349,7 +349,7 @@ function buildGroupedGraphQuery(rootLabel: string, maxDepth: number): string {
     OPTIONAL MATCH path = (root)-[pathRels:${STRUCTURAL_RELATION_TRAVERSAL}*0..${maxDepth}]->(reachable)
     WHERE reachable IS NULL OR (
       ALL(node IN nodes(path) WHERE ANY(label IN labels(node) WHERE label IN $include))
-      AND ALL(rel IN relationships(path) WHERE type(rel) <> 'CONTAINS_CATEGORY' OR '${rootLabel}' <> 'Channel' OR startNode(rel) = root OR rootId IN coalesce(rel.channelIds, []))
+      AND ALL(rel IN relationships(path) WHERE (type(rel) <> 'CONTAINS_CATEGORY' AND type(rel) <> 'CONTAINS_SUBJECT') OR '${rootLabel}' <> 'Channel' OR startNode(rel) = root OR rootId IN coalesce(rel.channelIds, []))
     )
     WITH rootId, root, collect(DISTINCT reachable) AS reachedNodes
     WITH rootId, [root] + reachedNodes AS rawNodes
@@ -359,7 +359,7 @@ function buildGroupedGraphQuery(rootLabel: string, maxDepth: number): string {
     OPTIONAL MATCH (node)-[rel]->(child)
     WHERE child IN nodes
       AND type(rel) IN $relations
-      AND (type(rel) <> 'CONTAINS_CATEGORY' OR '${rootLabel}' <> 'Channel' OR node = root OR rootId IN coalesce(rel.channelIds, []))
+      AND ((type(rel) <> 'CONTAINS_CATEGORY' AND type(rel) <> 'CONTAINS_SUBJECT') OR '${rootLabel}' <> 'Channel' OR node = root OR rootId IN coalesce(rel.channelIds, []))
     RETURN
       rootId,
       [n IN nodes | {id: n.id, labels: labels(n), props: properties(n)}] AS nodes,
