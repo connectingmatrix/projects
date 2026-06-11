@@ -59,6 +59,7 @@ const STRUCTURAL_RELATION_TRAVERSAL = STRUCTURAL_RELATION_SET.map((relation) => 
 const TREE_GRANT_RELATIONS = [ACCESS_RELATIONS.owns, STRUCTURAL_RELATIONS.links] as const;
 const ACCESS_TRAVERSAL = [...TREE_GRANT_RELATIONS].join('|');
 const TREE_NODE_LABELS = [GRAPH_LABELS.channel, GRAPH_LABELS.category, GRAPH_LABELS.subjectRef];
+const GLOBAL_ROOT_RELATION = 'OWNS_GLOBAL_CHANNEL';
 
 const DEFAULT_GRAPH_TREE_MAX_DEPTH = 8;
 const MAX_GRAPH_TREE_MAX_DEPTH = 24;
@@ -198,6 +199,36 @@ const CYPHER_RESOLVE_EXPLICIT_ORGANIZATION_ROOT_GRANT = /* cypher */ `
     LIMIT 1
 `;
 
+const CYPHER_LIST_GLOBAL_ROOT_GRANTS = /* cypher */ `
+    MATCH (:GlobalRoot {id: 'ROOT'})-[grant:${GLOBAL_ROOT_RELATION}]->(root:${GRAPH_LABELS.channel})
+    RETURN
+      root.id AS rootId,
+      root.id AS ancestorId,
+      'CHANNEL' AS rootType,
+      type(grant) AS grantType,
+      properties(grant) AS permission
+    ORDER BY coalesce(root.name, root.slug, root.id) ASC
+`;
+
+const CYPHER_RESOLVE_EXPLICIT_GLOBAL_ROOT_GRANT = /* cypher */ `
+    MATCH (:GlobalRoot {id: 'ROOT'})-[grant:${GLOBAL_ROOT_RELATION}]->(ancestor:${GRAPH_LABELS.channel})
+    MATCH path = (ancestor)-[:${STRUCTURAL_TRAVERSAL}*0..]->(root {id: $rootId})
+    WHERE (root:Channel OR root:Category OR root:SubjectRef)
+    RETURN
+      root.id AS rootId,
+      ancestor.id AS ancestorId,
+      CASE
+        WHEN root:Channel THEN 'CHANNEL'
+        WHEN root:Category THEN 'CATEGORY'
+        ELSE 'SUBJECT'
+      END AS rootType,
+      type(grant) AS grantType,
+      properties(grant) AS permission,
+      length(path) AS pathLength
+    ORDER BY pathLength ASC
+    LIMIT 1
+`;
+
 function resolveGraphTreeMaxDepth(input?: number): number {
   const candidate = Number.isFinite(Number(input)) ? Number(input) : Number(process.env.GRAPH_TREE_MAX_DEPTH || DEFAULT_GRAPH_TREE_MAX_DEPTH);
   if (!Number.isFinite(candidate) || candidate < 0) {
@@ -314,19 +345,15 @@ function buildBatchedGraphQuery(maxDepth: number): string {
     MATCH (root {id: rootRef.rootId})
     WHERE rootRef.rootLabel IN labels(root)
     OPTIONAL MATCH path = (root)-[pathRels:${STRUCTURAL_RELATION_TRAVERSAL}*0..${maxDepth}]->(reachable)
-    WHERE reachable IS NULL OR (
-      ALL(node IN nodes(path) WHERE ANY(label IN labels(node) WHERE label IN $include))
-      AND ALL(rel IN relationships(path) WHERE (type(rel) <> 'CONTAINS_CATEGORY' AND type(rel) <> 'CONTAINS_SUBJECT') OR rootRef.rootLabel <> 'Channel' OR startNode(rel) = root OR rootRef.rootId IN coalesce(rel.channelIds, []))
-    )
+    WHERE reachable IS NULL OR ALL(node IN nodes(path) WHERE ANY(label IN labels(node) WHERE label IN $include))
     WITH rootRef, root, collect(DISTINCT reachable) AS reachedNodes
-    WITH rootRef, [root] + reachedNodes AS rawNodes
+    WITH rootRef, root, [root] + reachedNodes AS rawNodes
     UNWIND rawNodes AS rawNode
-    WITH rootRef, collect(DISTINCT rawNode) AS nodes
+    WITH rootRef, root, collect(DISTINCT rawNode) AS nodes
     UNWIND nodes AS node
     OPTIONAL MATCH (node)-[rel]->(child)
     WHERE child IN nodes
       AND type(rel) IN $relations
-      AND ((type(rel) <> 'CONTAINS_CATEGORY' AND type(rel) <> 'CONTAINS_SUBJECT') OR rootRef.rootLabel <> 'Channel' OR node = root OR rootRef.rootId IN coalesce(rel.channelIds, []))
     RETURN
       rootRef.rootId AS rootId,
       [n IN nodes | {id: n.id, labels: labels(n), props: properties(n)}] AS nodes,
@@ -347,19 +374,15 @@ function buildGroupedGraphQuery(rootLabel: string, maxDepth: number): string {
     UNWIND $rootIds AS rootId
     MATCH (root:${rootLabel} {id: rootId})
     OPTIONAL MATCH path = (root)-[pathRels:${STRUCTURAL_RELATION_TRAVERSAL}*0..${maxDepth}]->(reachable)
-    WHERE reachable IS NULL OR (
-      ALL(node IN nodes(path) WHERE ANY(label IN labels(node) WHERE label IN $include))
-      AND ALL(rel IN relationships(path) WHERE (type(rel) <> 'CONTAINS_CATEGORY' AND type(rel) <> 'CONTAINS_SUBJECT') OR '${rootLabel}' <> 'Channel' OR startNode(rel) = root OR rootId IN coalesce(rel.channelIds, []))
-    )
+    WHERE reachable IS NULL OR ALL(node IN nodes(path) WHERE ANY(label IN labels(node) WHERE label IN $include))
     WITH rootId, root, collect(DISTINCT reachable) AS reachedNodes
-    WITH rootId, [root] + reachedNodes AS rawNodes
+    WITH rootId, root, [root] + reachedNodes AS rawNodes
     UNWIND rawNodes AS rawNode
-    WITH rootId, collect(DISTINCT rawNode) AS nodes
+    WITH rootId, root, collect(DISTINCT rawNode) AS nodes
     UNWIND nodes AS node
     OPTIONAL MATCH (node)-[rel]->(child)
     WHERE child IN nodes
       AND type(rel) IN $relations
-      AND ((type(rel) <> 'CONTAINS_CATEGORY' AND type(rel) <> 'CONTAINS_SUBJECT') OR '${rootLabel}' <> 'Channel' OR node = root OR rootId IN coalesce(rel.channelIds, []))
     RETURN
       rootId,
       [n IN nodes | {id: n.id, labels: labels(n), props: properties(n)}] AS nodes,
@@ -675,17 +698,32 @@ function normalizePermission(
   raw: Record<string, unknown> | AccessEdgeProperties | null,
 ): TreePermission {
   const permission = raw || {};
+  const recursiveGrant = grantType === ACCESS_RELATIONS.owns || grantType === STRUCTURAL_RELATIONS.links || grantType === GLOBAL_ROOT_RELATION;
   return {
     sourceUserPermissionsId: userPermissionsId,
     grantedByUserPermissionsId: typeof permission.grantedByUserPermissionsId === 'string' ? permission.grantedByUserPermissionsId : null,
     grantType,
-    read: grantType === 'OWNS' || grantType === 'LINKS' ? true : permission.read === true,
+    read: recursiveGrant ? true : permission.read === true,
     write: grantType === 'OWNS' ? true : permission.write === true,
-    recursive: grantType === 'OWNS' || grantType === 'LINKS' ? true : permission.recursive === true,
+    recursive: recursiveGrant ? true : permission.recursive === true,
     availableFrom: typeof permission.availableFrom === 'string' ? permission.availableFrom : null,
     availableTo: typeof permission.availableTo === 'string' ? permission.availableTo : null,
     inheritedFromResourceId: ancestorId,
   };
+}
+
+async function loadGlobalRootGrants(neo: Neo4JConnection, params: { rootId?: string }): Promise<TreeRootGrant[]> {
+  if (params.rootId) {
+    const rows = await neo.run<TreeRootGrant & { pathLength: number }>(CYPHER_RESOLVE_EXPLICIT_GLOBAL_ROOT_GRANT, { rootId: params.rootId });
+    return rows.map((row) => ({
+      rootId: row.rootId,
+      ancestorId: row.ancestorId,
+      rootType: row.rootType,
+      grantType: row.grantType,
+      permission: row.permission,
+    }));
+  }
+  return neo.run<TreeRootGrant>(CYPHER_LIST_GLOBAL_ROOT_GRANTS, {});
 }
 
 async function loadRootGrants(
@@ -864,6 +902,7 @@ async function buildForest(
       allowDescendants:
         rootGrant.grantType === ACCESS_RELATIONS.owns ||
         rootGrant.grantType === STRUCTURAL_RELATIONS.links ||
+        rootGrant.grantType === GLOBAL_ROOT_RELATION ||
         rootGrant.permission?.recursive === true,
       postsBySubjectId: rootPostsBySubjectId,
     });
@@ -915,13 +954,9 @@ export async function fetchUserTree(supabase: SupabaseClient, input: FetchUserTr
           rootId: input.rootId,
           nowIso,
         }),
-    input.includeGlobal === false || organizationId
+    input.includeGlobal === false
       ? Promise.resolve([])
-      : loadRootGrants(neo, {
-          userPermissionsId: GRAPH_SYSTEM_IDS.userGlobal,
-          rootId: input.rootId,
-          nowIso,
-        }),
+      : loadGlobalRootGrants(neo, { rootId: input.rootId }),
   ]);
 
   const rootGrantRows: RootGrantPageRow[] = [];
