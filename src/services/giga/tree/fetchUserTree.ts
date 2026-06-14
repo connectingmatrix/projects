@@ -211,9 +211,9 @@ const CYPHER_LIST_GLOBAL_ROOT_GRANTS = /* cypher */ `
 `;
 
 const CYPHER_RESOLVE_EXPLICIT_GLOBAL_ROOT_GRANT = /* cypher */ `
-    MATCH (:GlobalRoot {id: 'ROOT'})-[grant:${GLOBAL_ROOT_RELATION}]->(ancestor:${GRAPH_LABELS.channel})
-    MATCH path = (ancestor)-[:${STRUCTURAL_TRAVERSAL}*0..]->(root {id: $rootId})
+    MATCH (root {id: $rootId})
     WHERE (root:Channel OR root:Category OR root:SubjectRef)
+    MATCH path = (root)<-[:${STRUCTURAL_TRAVERSAL}*0..]-(ancestor:${GRAPH_LABELS.channel})<-[grant:${GLOBAL_ROOT_RELATION}]-(:GlobalRoot {id: 'ROOT'})
     RETURN
       root.id AS rootId,
       ancestor.id AS ancestorId,
@@ -228,6 +228,27 @@ const CYPHER_RESOLVE_EXPLICIT_GLOBAL_ROOT_GRANT = /* cypher */ `
     ORDER BY pathLength ASC
     LIMIT 1
 `;
+
+const cypherResolveExplicitGlobalRootGrantForType = (rootType: ResourceType): string => {
+  const rootLabel = GRAPH_RESOURCE_LABEL_BY_TYPE[rootType];
+  return /* cypher */ `
+    MATCH (root:${rootLabel} {id: $rootId})
+    MATCH path = (root)<-[:${STRUCTURAL_TRAVERSAL}*0..]-(ancestor:${GRAPH_LABELS.channel})<-[grant:${GLOBAL_ROOT_RELATION}]-(:GlobalRoot {id: 'ROOT'})
+    RETURN
+      root.id AS rootId,
+      ancestor.id AS ancestorId,
+      CASE
+        WHEN root:Channel THEN 'CHANNEL'
+        WHEN root:Category THEN 'CATEGORY'
+        ELSE 'SUBJECT'
+      END AS rootType,
+      type(grant) AS grantType,
+      properties(grant) AS permission,
+      length(path) AS pathLength
+    ORDER BY pathLength ASC
+    LIMIT 1
+  `;
+};
 
 function resolveGraphTreeMaxDepth(input?: number): number {
   const candidate = Number.isFinite(Number(input)) ? Number(input) : Number(process.env.GRAPH_TREE_MAX_DEPTH || DEFAULT_GRAPH_TREE_MAX_DEPTH);
@@ -553,6 +574,18 @@ async function loadGraphsForRootGrantsWithStats(
 
   const maxDepth = resolveGraphTreeMaxDepth(options?.maxDepth);
   const mode = options?.mode || 'auto';
+  const uniqueRootGrants = toUniqueRootGrants(rootGrants);
+
+  if (mode === 'auto' && uniqueRootGrants.length === 1) {
+    const legacyResult = await loadGraphsForRootGrantsLegacy(uniqueRootGrants, maxDepth);
+    return {
+      graphs: legacyResult.map,
+      mode: 'legacy',
+      queryCount: legacyResult.queryCount,
+      fallbackReason: null,
+      maxDepth,
+    };
+  }
 
   if (mode === 'legacy') {
     const legacyResult = await loadGraphsForRootGrantsLegacy(rootGrants, maxDepth);
@@ -643,7 +676,7 @@ async function loadTreeNodeSummaries(
   const summaryByNodeId = new Map<string, TreeNodeSummary>();
   const uniqueNodeIds = Array.from(new Set(nodeIds.filter(Boolean)));
   if (!uniqueNodeIds.length) return summaryByNodeId;
-  const summaryDepth = Math.max(resolveGraphTreeMaxDepth(maxDepth), DEFAULT_GRAPH_TREE_MAX_DEPTH);
+  const summaryDepth = resolveGraphTreeMaxDepth(maxDepth);
 
   const rows = await neo.run<{ categoryCount: number; nodeId: string; subjectCount: number; subjectIds: string[] }>(
     `
@@ -712,9 +745,10 @@ function normalizePermission(
   };
 }
 
-async function loadGlobalRootGrants(neo: Neo4JConnection, params: { rootId?: string }): Promise<TreeRootGrant[]> {
+async function loadGlobalRootGrants(neo: Neo4JConnection, params: { rootId?: string; rootType?: ResourceType }): Promise<TreeRootGrant[]> {
   if (params.rootId) {
-    const rows = await neo.run<TreeRootGrant & { pathLength: number }>(CYPHER_RESOLVE_EXPLICIT_GLOBAL_ROOT_GRANT, { rootId: params.rootId });
+    const query = params.rootType ? cypherResolveExplicitGlobalRootGrantForType(params.rootType) : CYPHER_RESOLVE_EXPLICIT_GLOBAL_ROOT_GRANT;
+    const rows = await neo.run<TreeRootGrant & { pathLength: number }>(query, { rootId: params.rootId });
     return rows.map((row) => ({
       rootId: row.rootId,
       ancestorId: row.ancestorId,
@@ -954,7 +988,7 @@ export async function fetchUserTree(supabase: SupabaseClient, input: FetchUserTr
     }),
     input.includeGlobal === false
       ? Promise.resolve([])
-      : loadGlobalRootGrants(neo, { rootId: input.rootId }),
+      : loadGlobalRootGrants(neo, { rootId: input.rootId, rootType: input.rootType || undefined }),
   ]);
 
   const rootGrantRows: RootGrantPageRow[] = [];
