@@ -93,7 +93,7 @@ const deleteSubjectAction = async (runtime: AgentActionRuntime, input?: InputRec
   };
 };
 
-const linkSubjectAction = async (runtime: AgentActionRuntime, input?: InputRecord): Promise<GigaActionOutput> => {
+const attachSubjectAction = async (runtime: AgentActionRuntime, input?: InputRecord): Promise<GigaActionOutput> => {
   await requireCapability(runtime, PERMISSION_MATRIX.SUBJECT.LINK, PERMISSION_MATRIX.SUBJECT.LINK);
   const payload = input || {};
   const subjectId = await resolveTreeNodeId(
@@ -112,7 +112,7 @@ const linkSubjectAction = async (runtime: AgentActionRuntime, input?: InputRecor
     },
     { idKey: 'id', label: 'category', nameKeys: ['category_name'], nodeType: RESOURCE_TYPES.category, preferScopedRoot: true },
   );
-  const result = await executeTreeMutation<Record<string, unknown>>(runtime, 'aiLinkSubjectToCategory', { input: { subjectId, categoryId } });
+  const result = await executeTreeMutation<Record<string, unknown>>(runtime, 'aiAttachSubjectToCategory', { input: { subjectId, categoryId } });
   return { summary: `Attached subject "${subjectId}" to category "${categoryId}".`, data: result, ...emptyActionArtifacts };
 };
 
@@ -232,6 +232,6 @@ export const SUBJECT_TREE_ACTION_HANDLERS: Partial<
   create_subject: createSubjectAction,
   update_subject: updateSubjectAction,
   delete_subject: deleteSubjectAction,
-  link_subject: linkSubjectAction,
+  link_subject: attachSubjectAction,
   unlink_subject: unlinkSubjectAction,
 };

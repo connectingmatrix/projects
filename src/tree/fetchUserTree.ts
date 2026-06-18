@@ -419,6 +419,27 @@ function buildGroupedGraphQuery(rootLabel: string, maxDepth: number): string {
   `;
 }
 
+// Builds the query used by explicit-root content routes; rootLabel scopes the concrete root label and first/offset are supplied later so large roots return only the direct children requested by the caller.
+function buildPageDirectChildrenGraphQuery(rootLabel: string): string {
+  return `
+    MATCH (root:${rootLabel} {id: $rootId})
+    OPTIONAL MATCH (root)-[rel:${STRUCTURAL_RELATION_TRAVERSAL}]->(child)
+    WHERE child IS NULL OR ANY(label IN labels(child) WHERE label IN $include)
+    WITH root, rel, child
+    ORDER BY coalesce(child.name, child.slug, child.id) ASC
+    WITH root, [row IN collect({rel: rel, child: child}) WHERE row.child IS NOT NULL][$offset..($offset + $first)] AS pageRows
+    RETURN
+      $rootId AS rootId,
+      [node IN ([root] + [row IN pageRows | row.child]) | {id: node.id, labels: labels(node), props: properties(node)}] AS nodes,
+      [row IN pageRows | {
+        sourceId: startNode(row.rel).id,
+        targetId: endNode(row.rel).id,
+        type: type(row.rel),
+        props: properties(row.rel)
+      }] AS edges
+  `;
+}
+
 function rowsToGraphMap(rows: Array<{ rootId: string; nodes: GraphNodeRecord[]; edges: GraphEdgeRecord[] }>): RootGraphMap {
   const graphMap: RootGraphMap = new Map();
   for (const row of rows) {
@@ -453,6 +474,25 @@ function batchedRootsInput(rootGrants: TreeRootGrant[]) {
     rootId: rootGrant.rootId,
     rootLabel: GRAPH_RESOURCE_LABEL_BY_TYPE[rootGrant.rootType],
   }));
+}
+
+// Loads a single explicit-root graph when pageDirectChildren is enabled; neo runs the query, rootGrant identifies the root, and first/offset supply the requested direct-child range.
+async function loadGraphForRootPageDirectChildren(neo: Neo4JConnection, rootGrant: TreeRootGrant, first: number, offset: number): Promise<{ map: RootGraphMap; queryCount: number }> {
+  const rows = await neo.run<{
+    rootId: string;
+    nodes: GraphNodeRecord[];
+    edges: GraphEdgeRecord[];
+  }>(buildPageDirectChildrenGraphQuery(GRAPH_RESOURCE_LABEL_BY_TYPE[rootGrant.rootType]), {
+    rootId: rootGrant.rootId,
+    include: TREE_NODE_LABELS,
+    first,
+    offset,
+  });
+  assertGraphRows(rows as Array<{ rootId?: string; nodes?: GraphNodeRecord[]; edges?: GraphEdgeRecord[] }>, [rootGrant.rootId]);
+  return {
+    map: rowsToGraphMap(rows),
+    queryCount: 1,
+  };
 }
 
 function mapRootIds(rootGrants: TreeRootGrant[]) {
@@ -558,8 +598,11 @@ async function loadGraphsForRootGrantsWithStats(
   neo: Neo4JConnection,
   rootGrants: TreeRootGrant[],
   options?: {
+    first?: number | null;
     maxDepth?: number;
     mode?: 'auto' | GraphLoadMode;
+    offset?: number | null;
+    pageDirectChildren?: boolean | null;
   },
 ): Promise<GraphLoadResult> {
   if (rootGrants.length === 0) {
@@ -575,6 +618,17 @@ async function loadGraphsForRootGrantsWithStats(
   const maxDepth = resolveGraphTreeMaxDepth(options?.maxDepth);
   const mode = options?.mode || 'auto';
   const uniqueRootGrants = toUniqueRootGrants(rootGrants);
+
+  if (mode === 'auto' && uniqueRootGrants.length === 1 && maxDepth === 1 && options?.pageDirectChildren === true && options.first && options.first > 0) {
+    const pageResult = await loadGraphForRootPageDirectChildren(neo, uniqueRootGrants[0], Math.floor(options.first), options.offset && options.offset > 0 ? Math.floor(options.offset) : 0);
+    return {
+      graphs: pageResult.map,
+      mode: 'grouped',
+      queryCount: pageResult.queryCount,
+      fallbackReason: null,
+      maxDepth,
+    };
+  }
 
   if (mode === 'auto' && uniqueRootGrants.length === 1) {
     const legacyResult = await loadGraphsForRootGrantsLegacy(uniqueRootGrants, maxDepth);
@@ -840,7 +894,7 @@ async function buildForest(
   userPermissionsId: string,
   rootGrants: TreeRootGrant[],
   orgContext?: OrganizationAccessContext | null,
-  options: { includeCounts?: boolean; includePosts?: boolean; maxDepth?: number | null } = {},
+  options: { first?: number | null; includeCounts?: boolean; includePosts?: boolean; maxDepth?: number | null; offset?: number | null; pageDirectChildren?: boolean | null } = {},
 ): Promise<FetchUserTreeResult['user']> {
   const buildStartedAt = Date.now();
 
@@ -868,7 +922,7 @@ async function buildForest(
   const forests: FetchUserTreeResult['user'] = [];
 
   const graphLoadStartedAt = Date.now();
-  const graphLoad = await loadGraphsForRootGrantsWithStats(neo, rootGrants, { maxDepth: options.maxDepth ?? undefined });
+  const graphLoad = await loadGraphsForRootGrantsWithStats(neo, rootGrants, { first: options.first ?? null, maxDepth: options.maxDepth ?? undefined, offset: options.offset ?? null, pageDirectChildren: options.pageDirectChildren === true });
   const graphLoadDurationMs = Date.now() - graphLoadStartedAt;
 
   const filteredGraphByRootId = new Map<string, TreeGraph>();
@@ -1001,22 +1055,30 @@ export async function fetchUserTree(supabase: SupabaseClient, input: FetchUserTr
   const organizationGrants = rootGrantsForBranch(pagedRootGrantRows, 'organization');
   const userGrants = rootGrantsForBranch(pagedRootGrantRows, 'user');
   const globalGrants = rootGrantsForBranch(pagedRootGrantRows, 'global');
-
   const [organization, user, global] = await Promise.all([
     buildForest(supabase, neo, input.userPermissionsId, organizationGrants, orgContext, {
+      first: input.first ?? null,
       includeCounts: input.includeCounts === true,
       includePosts: input.includePosts !== false,
       maxDepth: input.depth ?? null,
+      offset: input.offset ?? null,
+      pageDirectChildren: input.pageDirectChildren === true,
     }),
     buildForest(supabase, neo, input.userPermissionsId, userGrants, orgContext, {
+      first: input.first ?? null,
       includeCounts: input.includeCounts === true,
       includePosts: input.includePosts !== false,
       maxDepth: input.depth ?? null,
+      offset: input.offset ?? null,
+      pageDirectChildren: input.pageDirectChildren === true,
     }),
     buildForest(supabase, neo, GRAPH_SYSTEM_IDS.userGlobal, globalGrants, orgContext, {
+      first: input.first ?? null,
       includeCounts: input.includeCounts === true,
       includePosts: input.includePosts !== false,
       maxDepth: input.depth ?? null,
+      offset: input.offset ?? null,
+      pageDirectChildren: input.pageDirectChildren === true,
     }),
   ]);
 

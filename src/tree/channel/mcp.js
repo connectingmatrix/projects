@@ -114,7 +114,7 @@ const linkChannelAction = async (runtime, input) => {
         ...payload,
         id: (0, resolve_1.actionResultValue)(runtime, payload, ['channel_action_id'], ['channel_id', 'channel']) || (0, resolve_1.optionalText)(payload, 'channel_id') || '',
     }, { idKey: 'id', label: 'channel', nameKeys: ['channel_name'], nodeType: graph_types_1.RESOURCE_TYPES.channel, preferScopedRoot: true });
-    const result = await (0, inner_graphql_1.executeTreeMutation)(runtime, 'aiLinkChannel', { input: { parentChannelId, channelId } });
+    const result = await (0, inner_graphql_1.executeTreeMutation)(runtime, 'aiAttachChannelToChannel', { input: { parentChannelId, channelId } });
     return { summary: `Linked channel "${channelId}" under "${parentChannelId}".`, data: result, ...types_1.emptyActionArtifacts };
 };
 const unlinkChannelAction = async (runtime, input) => {

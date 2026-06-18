@@ -76,7 +76,7 @@ const deleteSubjectAction = async (runtime, input) => {
         ...types_1.emptyActionArtifacts,
     };
 };
-const linkSubjectAction = async (runtime, input) => {
+const attachSubjectAction = async (runtime, input) => {
     await (0, resolve_1.requireCapability)(runtime, permissions_1.PERMISSION_MATRIX.SUBJECT.LINK, permissions_1.PERMISSION_MATRIX.SUBJECT.LINK);
     const payload = input || {};
     const subjectId = await (0, resolve_1.resolveTreeNodeId)(runtime, {
@@ -87,7 +87,7 @@ const linkSubjectAction = async (runtime, input) => {
         ...payload,
         id: (0, resolve_1.actionResultValue)(runtime, payload, ['category_action_id'], ['category_id', 'category']) || (0, resolve_1.optionalText)(payload, 'category_id') || '',
     }, { idKey: 'id', label: 'category', nameKeys: ['category_name'], nodeType: graph_types_1.RESOURCE_TYPES.category, preferScopedRoot: true });
-    const result = await (0, inner_graphql_1.executeTreeMutation)(runtime, 'aiLinkSubjectToCategory', { input: { subjectId, categoryId } });
+    const result = await (0, inner_graphql_1.executeTreeMutation)(runtime, 'aiAttachSubjectToCategory', { input: { subjectId, categoryId } });
     return { summary: `Attached subject "${subjectId}" to category "${categoryId}".`, data: result, ...types_1.emptyActionArtifacts };
 };
 const unlinkSubjectAction = async (runtime, input) => {
@@ -168,6 +168,6 @@ exports.SUBJECT_TREE_ACTION_HANDLERS = {
     create_subject: createSubjectAction,
     update_subject: updateSubjectAction,
     delete_subject: deleteSubjectAction,
-    link_subject: linkSubjectAction,
+    link_subject: attachSubjectAction,
     unlink_subject: unlinkSubjectAction,
 };

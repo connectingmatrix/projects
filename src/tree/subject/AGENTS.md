@@ -10,7 +10,7 @@
 - `mcp.ts` may only map naming style; it must not fabricate missing required fields.
 - Nested subject/post creation must be relation-metadata-driven (`subjects`, `posts`) and strict fail-fast.
 - `CONTAINS_SUBJECT` is owned hierarchy and must never be removed by subject shared-placement unlink.
-- `aiLinkSubjectToCategory` is a legacy-named attach mutation and must create `CONTAINS_SUBJECT`.
+- `aiAttachSubjectToCategory` is the subject attach mutation and must create `CONTAINS_SUBJECT`.
 - Subject shared-placement writes use canonical `LINKS`; shared unlink removes only category-to-subject `LINKS`.
 - `Post` remains Supabase-only in this tree stack; nested post handling sets explicit `subject_id` from parent subject context.
 - Keep filenames camelCase.

@@ -138,7 +138,7 @@ const linkChannelAction = async (runtime: AgentActionRuntime, input?: InputRecor
     },
     { idKey: 'id', label: 'channel', nameKeys: ['channel_name'], nodeType: RESOURCE_TYPES.channel, preferScopedRoot: true },
   );
-  const result = await executeTreeMutation<Record<string, unknown>>(runtime, 'aiLinkChannel', { input: { parentChannelId, channelId } });
+  const result = await executeTreeMutation<Record<string, unknown>>(runtime, 'aiAttachChannelToChannel', { input: { parentChannelId, channelId } });
   return { summary: `Linked channel "${channelId}" under "${parentChannelId}".`, data: result, ...emptyActionArtifacts };
 };
 

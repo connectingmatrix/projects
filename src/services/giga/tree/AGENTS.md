@@ -14,7 +14,7 @@
 - `CONTAINS_CHANNEL`, `CONTAINS_CATEGORY`, and `CONTAINS_SUBJECT` mean owned hierarchy and must never be removed by shared-placement unlink actions.
 - `LINKS` is the canonical relation for user-created shared/cross-tree placement; link/unlink must use only `LINKS`.
 - Legacy `LINKS_CHANNEL` and `LINKS_CATEGORY` may appear only in migration/compatibility copy-forward code, never as new writes.
-- `aiLinkSubjectToCategory` is a legacy-named subject attach mutation and must create `CONTAINS_SUBJECT`.
+- `aiAttachSubjectToCategory` is the subject attach mutation and must create `CONTAINS_SUBJECT`.
 - Subject shared-placement unlink must delete `LINKS` from category to subject and preserve `CONTAINS_SUBJECT` so subjects stay searchable through their owned hierarchy.
 - Do not create root categories or root subjects.
 - Keep Chat, Workflow, MCP, and GraphQL as adapters over GraphQL validation and the tree service/entity path.

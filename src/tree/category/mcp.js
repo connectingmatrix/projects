@@ -83,7 +83,7 @@ const resolveChannelIds = async (runtime, input) => {
             : '');
     return Array.from(new Set([single, ...directIds].filter(Boolean)));
 };
-const linkCategoryAction = async (runtime, input) => {
+const attachCategoryAction = async (runtime, input) => {
     await (0, resolve_1.requireCapability)(runtime, permissions_1.PERMISSION_MATRIX.CATEGORY.LINK, permissions_1.PERMISSION_MATRIX.CATEGORY.LINK);
     const payload = input || {};
     const categoryId = await (0, resolve_1.resolveTreeNodeId)(runtime, {
@@ -91,8 +91,8 @@ const linkCategoryAction = async (runtime, input) => {
         id: (0, resolve_1.actionResultValue)(runtime, payload, ['category_action_id'], ['category_id', 'category']) || (0, resolve_1.optionalText)(payload, 'category_id') || '',
     }, { idKey: 'id', label: 'category', nameKeys: ['category_name'], nodeType: graph_types_1.RESOURCE_TYPES.category, preferScopedRoot: true });
     const channelIds = await resolveChannelIds(runtime, payload);
-    const result = await (0, inner_graphql_1.executeTreeMutation)(runtime, 'aiLinkCategoryToChannels', { input: { categoryId, channelIds } });
-    return { summary: `Linked category "${categoryId}" to channels.`, data: result, ...types_1.emptyActionArtifacts };
+    const result = await (0, inner_graphql_1.executeTreeMutation)(runtime, 'aiAttachCategoryToChannels', { input: { categoryId, channelIds } });
+    return { summary: `Attached category "${categoryId}" to channels.`, data: result, ...types_1.emptyActionArtifacts };
 };
 const unlinkCategoryAction = async (runtime, input) => {
     await (0, resolve_1.requireCapability)(runtime, permissions_1.PERMISSION_MATRIX.CATEGORY.UNLINK, permissions_1.PERMISSION_MATRIX.CATEGORY.UNLINK);
@@ -166,6 +166,6 @@ exports.CATEGORY_TREE_ACTION_HANDLERS = {
     create_category: createCategoryAction,
     update_category: updateCategoryAction,
     delete_category: deleteCategoryAction,
-    link_category: linkCategoryAction,
+    link_category: attachCategoryAction,
     unlink_category: unlinkCategoryAction,
 };

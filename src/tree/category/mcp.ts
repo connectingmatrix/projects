@@ -104,7 +104,7 @@ const resolveChannelIds = async (runtime: AgentActionRuntime, input: InputRecord
   return Array.from(new Set([single, ...directIds].filter(Boolean)));
 };
 
-const linkCategoryAction = async (runtime: AgentActionRuntime, input?: InputRecord): Promise<GigaActionOutput> => {
+const attachCategoryAction = async (runtime: AgentActionRuntime, input?: InputRecord): Promise<GigaActionOutput> => {
   await requireCapability(runtime, PERMISSION_MATRIX.CATEGORY.LINK, PERMISSION_MATRIX.CATEGORY.LINK);
   const payload = input || {};
   const categoryId = await resolveTreeNodeId(
@@ -116,8 +116,8 @@ const linkCategoryAction = async (runtime: AgentActionRuntime, input?: InputReco
     { idKey: 'id', label: 'category', nameKeys: ['category_name'], nodeType: RESOURCE_TYPES.category, preferScopedRoot: true },
   );
   const channelIds = await resolveChannelIds(runtime, payload);
-  const result = await executeTreeMutation<Record<string, unknown>>(runtime, 'aiLinkCategoryToChannels', { input: { categoryId, channelIds } });
-  return { summary: `Linked category "${categoryId}" to channels.`, data: result, ...emptyActionArtifacts };
+  const result = await executeTreeMutation<Record<string, unknown>>(runtime, 'aiAttachCategoryToChannels', { input: { categoryId, channelIds } });
+  return { summary: `Attached category "${categoryId}" to channels.`, data: result, ...emptyActionArtifacts };
 };
 
 const unlinkCategoryAction = async (runtime: AgentActionRuntime, input?: InputRecord): Promise<GigaActionOutput> => {
@@ -226,6 +226,6 @@ export const CATEGORY_TREE_ACTION_HANDLERS: Partial<
   create_category: createCategoryAction,
   update_category: updateCategoryAction,
   delete_category: deleteCategoryAction,
-  link_category: linkCategoryAction,
+  link_category: attachCategoryAction,
   unlink_category: unlinkCategoryAction,
 };
